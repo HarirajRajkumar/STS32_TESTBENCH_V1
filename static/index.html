@@ -300,6 +300,19 @@ pre{background:var(--soft);border-radius:8px;padding:10px;overflow:auto;font-siz
       <div id="fwMsg" class="msg"></div>
       <pre id="fwLog" style="max-height:260px;display:none"></pre>
       <div class="mut">Use stable power, keep only this servo on the bus, and don't unplug anything or close the window during the upload.</div>
+      <h3>Restore servo settings</h3>
+      <p class="mut">Use this if the servo shows <b>Settings wiped</b> (model 9.255, limits 65535, voltage alarm, 0 V / 10 °C readings)
+        although the supply is on. It writes a saved settings snapshot of <b>this servo</b> back, then restarts it.
+        A snapshot is saved automatically before every upload. ID and baud are never changed. Redo Centre and Positions afterwards.</p>
+      <div class="row">
+        <label style="flex:1">Backup<select id="rsFile" style="min-width:420px"></select></label>
+        <button id="rsRefresh">Refresh</button>
+      </div>
+      <div class="row">
+        <label>Type RESTORE<input id="rsConfirm" style="width:110px" autocomplete="off"></label>
+        <button id="rsGo" class="big">Restore settings</button>
+      </div>
+      <div id="rsMsg" class="msg"></div>
       <details><summary>Manual commands (PowerShell, in the STS32XX-Firmware folder)</summary><pre id="fwCmds"></pre></details>
     </div>
   </section>
@@ -510,6 +523,14 @@ $('fwFlash').onclick=async()=>{const which=document.querySelector('input[name=fw
   if(ST&&ST.servo&&ST.servo.firmware_family===which&&!confirm('The servo already runs this firmware. Flash it again?'))return;
   const j=await api('/api/fw/flash',{which,confirm:$('fwConfirm').value,firmware_before:ST&&ST.servo?ST.servo.firmware_label:null});
   $('fwConfirm').value='';$('fwMsg').innerHTML=j.ok?'Uploading…':bad(j.error);};
+async function loadBackups(){const j=await api('/api/settings/backups');const l=j.backups||[];
+  $('rsFile').innerHTML=l.length?l.map(r=>`<option value="${r.file}">${r.when} · ID ${r.id} · fw ${r.fw} · model ${r.model} · limits ${r.limits} · ${r.volts} V · ${r.source}</option>`).join(''):
+    '<option value="">no backups found</option>';}
+loadBackups();$('rsRefresh').onclick=loadBackups;
+$('rsGo').onclick=async()=>{if(!$('rsFile').value){$('rsMsg').innerHTML=bad('no backup selected');return;}
+  $('rsMsg').textContent='restoring… (about 5 s)';const j=await api('/api/settings/restore',{file:$('rsFile').value,confirm:$('rsConfirm').value});$('rsConfirm').value='';
+  $('rsMsg').innerHTML=!j.ok?bad(j.error):(j.mismatches.length?bad(`${j.written} written but ${j.mismatches.length} registers did not keep their value: ${JSON.stringify(j.mismatches)}`):
+    good(`Restored ${j.written} registers. Servo: ${j.firmware}, model ${j.model}, ${j.voltage} V, alarm ${j.alarm}. Now redo 3 Centre and 4 Positions.`));};
 function fwJobView(f){if(!f)return;$('fwLog').style.display='block';$('fwLog').textContent=f.log.join('\n');$('fwLog').scrollTop=1e9;
   $('fwMsg').innerHTML=f.state==='running'?'<b class="warnc">Uploading. Don\'t unplug anything.</b>':
     f.state==='done'?good(`Done. Servo now runs ${f.firmware_after}. Redo 3 Centre and 4 Positions.`)+(f.note?`<br><span class="warnc">${f.note}</span>`:''):

@@ -19,7 +19,7 @@ from runner import Run
 from sts import DEFAULT_EXT_CONFIG, MIN_SUPPLY_V, R_LOCK, Bus, BusError
 from vision import QwenReader, api_key, apply_decimals, fixed_decimals
 
-APP_VERSION = "1.4.3"     # 1.4.3: detect wiped settings area; supply guard message covers both causes
+APP_VERSION = "1.5.0"     # 1.5.0: restore servo settings from a backup (Firmware tab)
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(HERE, "settings.json")
 FLASH_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "firmware", "STS32XX-Firmware", "STS32XX-Firmware",
@@ -799,6 +799,78 @@ def fw_flash():
                     firmware_before=b.get("firmware_before"))
     threading.Thread(target=_fw_worker, args=(which, port, baud, sid), name="flash", daemon=True).start()
     return ok()
+
+
+# ------------------------------------------------------------------ settings restore (wiped settings area)
+BACKUP_DIR = os.path.normpath(os.path.join(FLASH_DIR, "..", "..", "backups"))
+
+
+def settings_backups():
+    """Healthy register snapshots: settings.py backups (incl. the one taken before every flash from the bench)
+    and the 'before' snapshot of each normal flash report. Newest first."""
+    import glob
+    from sts import validate_settings_table
+    out = []
+    cands = [(p, "registers_hex") for p in glob.glob(os.path.join(BACKUP_DIR, "settings", "*.json"))]
+    cands += [(p, "before_registers_hex") for p in glob.glob(os.path.join(BACKUP_DIR, "flash", "*", "report.json"))]
+    for path, key in cands:
+        d = storage.read_json(path) or {}
+        if key == "before_registers_hex" and d.get("mode") != "flash":
+            continue
+        try:
+            t = validate_settings_table(bytes.fromhex(d.get(key) or ""))
+        except ValueError:
+            continue
+        ts = d.get("created_unix_s") or d.get("started_unix_s") or os.path.getmtime(path)
+        out.append(dict(file=os.path.relpath(path, BACKUP_DIR), when=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts)),
+                        ts=ts, id=t[5], fw="%d.%d" % (t[0], t[1]), model="%d.%d" % (t[3], t[4]),
+                        limits="%d..%d" % (t[9] | t[10] << 8, t[11] | t[12] << 8),
+                        volts="%.1f..%.1f" % (t[15] / 10, t[14] / 10), offset_raw=t[31] | t[32] << 8,
+                        source="flash report" if key == "before_registers_hex" else "settings backup"))
+    out.sort(key=lambda r: r["ts"], reverse=True)
+    return out
+
+
+@app.route("/api/settings/backups")
+def settings_backups_api():
+    return ok(backups=settings_backups(), backup_dir=BACKUP_DIR)
+
+
+@app.route("/api/settings/restore", methods=["POST"])
+def settings_restore():
+    """Write a backed-up settings snapshot back into the servo. Deliberately NOT behind no_power(): a wiped
+    settings area causes the voltage alarm this fixes."""
+    b = body()
+    if (b.get("confirm") or "").strip() != "RESTORE":
+        return fail("type RESTORE to confirm")
+    if S.running():
+        return fail("stop the run / upload first")
+    if not S.bus:
+        return fail("connect first (step 1). A servo with wiped settings still connects at ID 1.")
+    known = {r["file"]: r for r in settings_backups()}
+    if b.get("file") not in known:
+        return fail("choose one of the listed backups")
+    path = os.path.join(BACKUP_DIR, b["file"])
+    d = storage.read_json(path) or {}
+    table = bytes.fromhex(d.get("registers_hex") or d.get("before_registers_hex"))
+    sid = S.settings["id"]
+    S.runner_owns_bus = True
+    try:
+        res = S.bus.restore_settings(sid, table)
+        S.servo_info = S.bus.identify(sid)
+        S.servo_info["id"] = sid
+    except (BusError, ValueError) as e:
+        return fail("restore failed: %s" % e)
+    finally:
+        S.runner_owns_bus = False
+    a = res["after"]
+    S.settings["soft_min"], S.settings["soft_max"] = S.servo_info["min_limit"], S.servo_info["max_limit"]
+    S.calib.update(center_ok=False, positions_saved=False,
+                   settings_restored=time.strftime("%Y-%m-%d %H:%M:%S") + " from " + b["file"])
+    S.settings["calib"] = S.calib
+    S.save_settings()
+    return ok(written=res["written"], mismatches=res["mismatches"], firmware=S.servo_info["firmware_label"],
+              voltage=a[62] / 10, alarm=a[65], model="%d.%d" % (a[3], a[4]))
 
 
 def shutdown():

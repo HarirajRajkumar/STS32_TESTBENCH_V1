@@ -20,6 +20,21 @@ R_MIN_LIMIT, R_MAX_LIMIT = 0x09, 0x0B
 R_TORQUE, R_ACC, R_GOAL_POS = 0x28, 0x29, 0x2A
 R_POS_CORRECTION, R_LOCK = 0x1F, 0x37
 MIN_SUPPLY_V = 6.0             # below this the motor supply is off: refuse calibration, motion and flashing
+SETTINGS_ADDRS = tuple(range(4, 40)) + tuple(range(78, 87))   # persistent settings (same set as RoboNine settings.py)
+
+
+def validate_settings_table(table, sid=None):
+    """An 87-byte register snapshot from a healthy STS3215 (RoboNine settings.py format)."""
+    t = bytes(table)
+    if len(t) != 87 or t[0] != 3 or t[3] != 9:
+        raise ValueError("not an 87-byte STS3215 register snapshot")
+    if t[4] == 0xFF or t[9:13] == b"\xff\xff\xff\xff" or not 0 < t[15] < t[14]:
+        raise ValueError("this snapshot is itself wiped / invalid (model 9.255, limits 65535 or bad voltage limits)")
+    if t[5] > 253 or t[6] > 7 or t[8] not in (0, 1):
+        raise ValueError("invalid ID, baud selector or response level in the snapshot")
+    if sid is not None and t[5] != sid:
+        raise ValueError("snapshot is for ID %d, servo is ID %d" % (t[5], sid))
+    return t
 R_PRESENT_POS = 0x38           # 0x38..0x46 read as one block (15 bytes) for telemetry
 R_MOVING = 0x42
 
@@ -246,6 +261,39 @@ class Bus:
         _, c = self.read(sid, R_POS_CORRECTION, 2)
         pos = self.telemetry(sid)["pos"]
         return pos, sign11_decode(c[0] | c[1] << 8)
+
+    def restore_settings(self, sid, table):
+        """Write a backed-up settings snapshot back (fixes a wiped settings area: all 0xFF, permanent voltage
+        alarm). Unlike RoboNine settings.py restore it works while the alarm is active. ID and baud are never
+        changed. Torque off, unlock, write + read back each differing register (voltage limits first), lock,
+        reboot, verify. Returns dict(written, mismatches, after)."""
+        t = validate_settings_table(table, sid)
+        _, now = self.read(sid, 0, 87)
+        if now[6] != t[6]:
+            raise BusError("snapshot baud selector %d differs from the live one %d" % (t[6], now[6]))
+        addrs = sorted((a for a in SETTINGS_ADDRS if a not in (5, 6) and now[a] != t[a]),
+                       key=lambda a: (a not in (14, 15), a))
+        self.torque(sid, False)
+        time.sleep(0.05)
+        self.write_u8(sid, R_LOCK, 0)
+        time.sleep(0.06)
+        bad = []
+        try:
+            for a in addrs:
+                self.write_u8(sid, a, t[a])
+                time.sleep(0.06)
+                _, r = self.read(sid, a, 1)
+                if r[0] != t[a]:
+                    bad.append((a, r[0], t[a]))
+        finally:
+            self.write_u8(sid, R_LOCK, 1)                # always relock (stores to EEPROM)
+            time.sleep(0.1)
+        self.transact(sid, 0x08, b"", reply=False)      # reboot: the firmware applies settings at start-up
+        time.sleep(1.5)
+        _, after = self.read(sid, 0, 87)
+        bad += [(a, after[a], t[a]) for a in SETTINGS_ADDRS if a not in (5, 6) and after[a] != t[a]
+                and (a, after[a], t[a]) not in bad]
+        return dict(written=len(addrs), mismatches=bad, after=bytes(after))
 
     def write_limits(self, sid, lo, hi):
         """Saved position limits (EEPROM 0x09..0x0C): unlock 0x37, write, relock, read back."""

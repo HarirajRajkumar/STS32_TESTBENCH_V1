@@ -124,3 +124,9 @@ field. Check the frames for the known 8↔0 misread before you trust a run.
 `python selfcheck.py` runs offline, with no port, camera or Qwen. It checks the protocol framing against the
 RoboNine documentation example, Qwen reply parsing and the statistics. It also runs complete T4.1a and T4.2b tests in
 both modes against a simulated servo.
+
+## Troubleshooting
+
+See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md): the 2026-11-25 incident (settings area wiped after the
+RoboNine flash), how to recognise each failure state, firmware recovery with `flash.py recover`, and
+**Change firmware → Restore servo settings** for a wiped settings area.
