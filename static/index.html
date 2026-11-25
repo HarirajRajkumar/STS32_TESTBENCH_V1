@@ -478,7 +478,12 @@ $('refreshRuns').onclick=loadRuns;
 
 // ---------- 8 firmware
 function fwHtml(s){if(!s)return'<p class="say">Connect a servo to see its firmware.</p>';const e=s.extension;
-  return `<div class="nums"><div class="num"><b>${s.firmware_label}</b><span>on the servo now</span></div><div class="num"><b>${e?e.magic+' '+e.major+'.'+e.minor:'none'}</b><span>RoboNine extension</span></div><div class="num"><b>${s.min_limit}..${s.max_limit}</b><span>limits in servo</span></div></div>`;}
+  const v=ST&&ST.telem?ST.telem.voltage:null;
+  return `<div class="nums"><div class="num"><b>${s.firmware_label}</b><span>on the servo now</span></div><div class="num"><b>${e?e.magic+' '+e.major+'.'+e.minor:'no reply'}</b><span>extension check (0x90)</span></div>
+    <div class="num"><b>${s.fw}</b><span>version regs 0-1</span></div><div class="num"><b>${s.model}</b><span>model regs 3-4</span></div><div class="num"><b>${v??'–'} V</b><span>supply</span></div></div>
+    <p class="mut">How the bench tells them apart: both firmwares report version 3.10 in registers 0-1. Only RoboNine answers the
+    extension read (instruction 0x90, capabilities) with <b>ARMC 9.0</b>; Feetech gives an empty reply. The flasher checks the same thing after an upload.</p>
+    ${v!==null&&v<6?'<p class="err"><b>Supply voltage is '+v+' V: turn the servo power on. Flashing is refused while the voltage alarm is active.</b></p>':''}`;}
 const FWCMD=p=>`# one-time setup
 python -m venv tools\\flash\\.venv
 tools\\flash\\.venv\\Scripts\\python -m pip install -r tools\\flash\\requirements.txt

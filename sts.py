@@ -179,9 +179,11 @@ class Bus:
         return self.write(sid, addr, [v & 0xFF])
 
     def identify(self, sid):
-        _, d = self.read(sid, R_FW_MAJOR, 4)
+        # regs 0-1 firmware version, 3-4 servo model (9.3 = STS3215): the same bytes flash.py checks.
+        # RoboNine keeps the factory version bytes (3.10), so ONLY the extension caps read below tells them apart.
+        _, d = self.read(sid, R_FW_MAJOR, 5)
         _, lim = self.read(sid, R_MIN_LIMIT, 4)
-        info = dict(fw="%d.%d" % (d[0], d[1]), model="%d.%d" % (d[3], d[2]),
+        info = dict(fw="%d.%d" % (d[0], d[1]), model="%d.%d" % (d[3], d[4]),
                     min_limit=lim[0] | lim[1] << 8, max_limit=lim[2] | lim[3] << 8)
         caps = self.ext_caps(sid)
         info["extension"] = caps

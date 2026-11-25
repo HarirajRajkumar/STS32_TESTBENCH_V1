@@ -19,7 +19,7 @@ from runner import Run
 from sts import DEFAULT_EXT_CONFIG, R_LOCK, Bus, BusError
 from vision import QwenReader, api_key, apply_decimals, fixed_decimals
 
-APP_VERSION = "1.4.0"     # 1.4.0: wobble option, firmware flashing from the app, fixed gauge decimals
+APP_VERSION = "1.4.1"     # 1.4.1: model read from regs 3-4, firmware tab explains detection + supply check
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(HERE, "settings.json")
 FLASH_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "firmware", "STS32XX-Firmware", "STS32XX-Firmware",
