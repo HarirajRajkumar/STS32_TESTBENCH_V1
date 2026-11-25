@@ -19,7 +19,7 @@ from runner import Run
 from sts import DEFAULT_EXT_CONFIG, MIN_SUPPLY_V, R_LOCK, Bus, BusError
 from vision import QwenReader, api_key, apply_decimals, fixed_decimals
 
-APP_VERSION = "1.4.2"     # 1.4.2: refuse calibration/motion/flash without motor supply; no-power label
+APP_VERSION = "1.4.3"     # 1.4.3: detect wiped settings area; supply guard message covers both causes
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(HERE, "settings.json")
 FLASH_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "firmware", "STS32XX-Firmware", "STS32XX-Firmware",
@@ -119,8 +119,11 @@ def no_power():
     except Exception as e:
         return fail("cannot read the servo: %s" % e)
     if v < MIN_SUPPLY_V:
-        return fail("No motor power: the servo reads %.1f V. Switch on the 12 V supply (check the plug and the "
-                    "current limit), then Connect again." % v)
+        if S.servo_info and S.servo_info.get("settings_wiped"):
+            return fail("The servo's settings area is wiped (model 9.255, limits 65535, voltage alarm). Restore its "
+                        "settings from the backup in firmware/.../backups/settings before anything else.")
+        return fail("The servo reads %.1f V with a voltage alarm. Check the 12 V supply first; if the supply is on, "
+                    "the servo's settings may be wiped (see the Firmware tab)." % v)
     return None
 
 

@@ -192,10 +192,15 @@ class Bus:
             info["voltage"] = self.telemetry(sid)["voltage"]
         except BusError:
             info["voltage"] = None
-        if info["voltage"] is not None and info["voltage"] < MIN_SUPPLY_V and not caps:
-            # chip alive on signal-line leakage only: registers are garbage and the extension cannot answer
+        info["settings_wiped"] = d[4] == 0xFF or (lim[0] == lim[1] == lim[2] == lim[3] == 0xFF)
+        if info["settings_wiped"]:
+            # erased settings area (model minor 255, limits 65535, voltage limits 25.5 V): the voltage alarm is
+            # permanent and sensor readings are meaningless until the settings are restored from a backup
             info["firmware_family"] = "unknown"
-            info["firmware_label"] = "No motor power (%.1f V)" % info["voltage"]
+            info["firmware_label"] = "Settings wiped (restore needed)"
+        elif info["voltage"] is not None and info["voltage"] < MIN_SUPPLY_V and not caps:
+            info["firmware_family"] = "unknown"
+            info["firmware_label"] = "No motor power? (%.1f V)" % info["voltage"]
         elif caps and caps["magic"] == "ARMC":
             info["firmware_family"] = "robonine"
             info["firmware_label"] = "RoboNine v%d.%d (fw %s)" % (caps["major"], caps["minor"], info["fw"])
