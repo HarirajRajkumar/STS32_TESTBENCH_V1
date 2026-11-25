@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STS3215 Repeatability Bench</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--line:#dcdfe4;--fg:#1d2330;--mut:#6b7280;--acc:#2563eb;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;--plus:#2563eb;--minus:#d97706;--soft:#eef2f7}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 "Segoe UI",system-ui,sans-serif}
+header{display:flex;align-items:center;gap:12px;padding:10px 18px;background:var(--card);border-bottom:1px solid var(--line)}
+header h1{font-size:17px;margin:0;font-weight:600}
+.chip{padding:3px 10px;border-radius:999px;font-size:13px;background:var(--soft);color:var(--mut)}
+.chip.on{background:#dcfce7;color:#166534}
+#estop{margin-left:auto;background:var(--bad);color:#fff;border:0;border-radius:8px;padding:10px 20px;font-weight:700;font-size:15px;cursor:pointer}
+nav{display:flex;gap:6px;padding:12px 18px 0;flex-wrap:wrap}
+nav button{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:6px 14px 6px 6px;font:inherit;color:var(--mut);cursor:pointer}
+nav button i{font-style:normal;width:24px;height:24px;border-radius:50%;background:var(--soft);display:grid;place-items:center;font-size:13px;font-weight:700}
+nav button.act{border-color:var(--acc);color:var(--fg)}nav button.act i{background:var(--acc);color:#fff}
+nav button.done i{background:var(--ok);color:#fff}
+nav .sep{flex:1}
+main{display:grid;grid-template-columns:minmax(380px,1fr) minmax(420px,1.1fr);gap:16px;padding:14px 18px}
+@media(max-width:1000px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px}
+.step{display:none}.step.act{display:block}
+h2{font-size:20px;margin:0 0 4px}h3{font-size:15px;margin:18px 0 6px}
+.say{color:var(--mut);margin:0 0 16px}
+ol.how{margin:0 0 16px;padding-left:22px}ol.how li{margin:4px 0}
+.row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:10px 0}
+label{font-size:13px;color:var(--mut);display:flex;flex-direction:column;gap:3px}
+input,select,textarea{background:#fff;color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:7px 9px;font:inherit}
+input[type=number]{width:100px}
+button{background:#fff;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer}
+button:hover{border-color:var(--acc)}button:disabled{opacity:.45;cursor:not-allowed}
+button.big{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600;padding:11px 22px;font-size:16px}
+button.green{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600}
+button.next{float:right;margin-top:14px}
+.msg{min-height:22px;margin-top:8px}.okc{color:var(--ok)}.err{color:var(--bad)}.warnc{color:var(--warn)}.mut{color:var(--mut);font-size:13px}
+.nums{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
+.num{background:var(--soft);border-radius:8px;padding:8px 12px;min-width:90px}.num b{display:block;font-size:22px;font-variant-numeric:tabular-nums}.num span{font-size:12px;color:var(--mut)}
+.vidwrap{position:relative;width:100%;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:16/9}
+.vidwrap img{width:100%;height:100%;object-fit:contain;display:block;user-select:none;-webkit-user-drag:none}
+#roiBox{position:absolute;border:3px solid #22c55e;box-shadow:0 0 0 9999px rgba(0,0,0,.3);pointer-events:none;display:none}
+.vidwrap.drawing{cursor:crosshair}
+.live{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-variant-numeric:tabular-nums}.live b{font-size:17px}
+details{margin-top:14px;border-top:1px solid var(--line);padding-top:8px}details summary{cursor:pointer;color:var(--mut)}
+table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{padding:4px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}th{color:var(--mut);font-weight:500;position:sticky;top:0;background:var(--card)}
+td:first-child,th:first-child{text-align:left}
+.scroll{max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+td input{width:70px;padding:2px 4px}
+.dp{color:var(--plus)}.dm{color:var(--minus)}
+canvas{width:100%;height:220px;background:#fff;border-radius:8px;border:1px solid var(--line)}
+.phase{font-size:22px;font-weight:700}
+.prog{height:10px;background:var(--soft);border-radius:5px;overflow:hidden;margin:8px 0}.prog i{display:block;height:100%;background:var(--acc);width:0}
+.choice{display:flex;gap:8px;flex-wrap:wrap}.choice label{flex-direction:row;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--fg);font-size:15px;cursor:pointer}
+.choice label:has(input:checked){border-color:var(--acc);background:#eff6ff}
+pre{background:var(--soft);border-radius:8px;padding:10px;overflow:auto;font-size:12px;white-space:pre-wrap}
+.thumb{height:28px;border-radius:3px;vertical-align:middle;cursor:zoom-in}
+#zoom{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;align-items:center;justify-content:center;z-index:9}#zoom img{max-width:90vw;max-height:90vh}
+.box{border:2px solid var(--warn);border-radius:10px;padding:12px;margin-top:10px}
+.mono{font-family:Consolas,monospace;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>STS3215 Repeatability Bench <span id="appVer" class="mut" style="font-weight:400"></span></h1>
+  <span id="bConn" class="chip">servo: not connected</span>
+  <span id="bFw" class="chip">firmware ?</span>
+  <span id="bVis" class="chip">Qwen ?</span>
+  <button id="estop" title="Torque off now and stop the run">E-STOP</button>
+</header>
+
+<nav id="nav">
+  <button data-s="1" class="act"><i>1</i>Connect</button>
+  <button data-s="2"><i>2</i>Camera</button>
+  <button data-s="3"><i>3</i>Centre</button>
+  <button data-s="4"><i>4</i>Positions</button>
+  <button data-s="6"><i>5</i>Run test</button>
+  <span class="sep"></span>
+  <button data-s="7"><i>≡</i>Results</button>
+  <button data-s="8"><i>⇄</i>Change firmware</button>
+</nav>
+
+<main>
+  <!-- ======================= LEFT: the current step ======================= -->
+  <section class="card">
+
+    <!-- 1 CONNECT -->
+    <div class="step act" id="s1">
+      <h2>1 · Connect the servo</h2>
+      <p class="say">Close FT SCServo Debug first. Only one program can use the port.</p>
+      <div class="row">
+        <label>Port<select id="port"></select></label>
+        <button id="connect" class="big">Connect</button>
+      </div>
+      <div id="connMsg" class="msg"></div>
+      <details><summary>More (baud, ID, scan, release port)</summary>
+        <div class="row">
+          <label>Baud<select id="baud"><option>1000000</option><option>500000</option><option>115200</option></select></label>
+          <label>Servo ID<input id="sid" type="number" value="1" min="0" max="253" style="width:70px"></label>
+          <button id="scan">Find ID</button>
+          <button id="disconnect">Release port</button>
+        </div>
+      </details>
+      <button class="next" data-go="2">Next →</button>
+    </div>
+
+    <!-- 2 CAMERA -->
+    <div class="step" id="s2">
+      <h2>2 · Camera on the dial gauge</h2>
+      <ol class="how">
+        <li>Pick the camera that shows the gauge, then click <b>Open</b>.</li>
+        <li>If the digits are upside down, set <b>Rotate</b> to 180°.</li>
+        <li>Click <b>Draw box</b> and drag over the gauge display in the picture.</li>
+        <li>Set how many digits your gauge shows after the point (0.99 → 2).</li>
+        <li>Click <b>Test read</b>. The number must match the gauge.</li>
+      </ol>
+      <div class="row"><label>Digits after the point on the gauge<select id="r_gauge_decimals" onchange="api('/api/run/defaults',{gauge_decimals:this.value===''?null:+this.value})">
+        <option value="">as Qwen reads it</option><option value="1">1 (0.9)</option><option value="2">2 (0.99)</option><option value="3">3 (0.999)</option></select></label></div>
+      <div class="row">
+        <label>Camera<select id="camSel"><option>0</option></select></label>
+        <button id="camFind">Find</button>
+        <button id="camOpen" class="big">Open</button>
+        <label>Rotate<select id="camRot"><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></label>
+      </div>
+      <div class="row">
+        <button id="roiDraw" class="big">Draw box</button>
+        <button id="qwenTest" class="green">Test read</button>
+      </div>
+      <div class="row" style="align-items:center">
+        <img id="cropImg" style="max-height:90px;border-radius:6px;border:1px solid var(--line)" alt="">
+        <div><div id="qwenRes" class="phase" style="font-size:20px"></div><div id="qwenNote" class="mut"></div></div>
+      </div>
+      <div id="camMsg" class="msg mut"></div>
+      <details><summary>More (mirror, clear box, vision server)</summary>
+        <div class="row">
+          <label>Mirror<select id="camFlip"><option value="none">none</option><option value="h">left-right</option><option value="v">top-bottom</option></select></label>
+          <button id="roiClear">Clear box</button>
+        </div>
+        <div class="row"><label>Server URL<input id="vUrl" style="width:260px" placeholder="http://172.16.0.30:4000/v1"></label>
+          <label>Model<input id="vModel" style="width:120px" placeholder="vision"></label><button id="vSave">Save</button></div>
+        <div class="mut">The key comes from MOTORON_VISION_KEY, the same as the MOTORON bench.</div>
+      </details>
+      <button class="next" data-go="3">Next →</button>
+    </div>
+
+    <!-- 3 CENTRE -->
+    <div class="step" id="s3">
+      <h2>3 · Set the centre</h2>
+      <ol class="how">
+        <li>Point the lever <b>straight up</b> and hold it still.</li>
+        <li>Click the button. This position becomes <b>2048</b> (saved in the servo).</li>
+      </ol>
+      <p class="say">Do this again after every firmware flash.</p>
+      <button id="calCenter" class="big">Set centre = 2048</button>
+      <div id="calCenterMsg" class="msg"></div>
+      <button class="next" data-go="4">Next →</button>
+    </div>
+
+    <!-- 4 POSITIONS -->
+    <div class="step" id="s4">
+      <h2>4 · Mark the two positions</h2>
+      <ol class="how">
+        <li>Click <b>Release</b>. The motor goes limp.</li>
+        <li>Move the lever by hand <b>away from the gauge, to the end</b>. Click <b>Mark away end</b>.</li>
+        <li>Move it towards the gauge until it <b>touches and the gauge shows a reading</b> (needle mid-travel).
+          Hold it there and click <b>Mark gauge position</b>.</li>
+        <li>Click <b>Save</b>.</li>
+      </ol>
+      <div class="row"><button id="tqOff">Release (motor limp)</button></div>
+      <div class="row">
+        <button id="markAway" class="big">Mark away end</button>
+        <button id="markGauge" class="big">Mark gauge position</button>
+        <button id="posSave" class="big green">Save</button>
+      </div>
+      <div class="nums">
+        <div class="num"><b id="pAway">–</b><span>away end</span></div>
+        <div class="num"><b id="pGauge">–</b><span>gauge position</span></div>
+        <div class="num"><b id="tgNow">–</b><span>lever now</span></div>
+      </div>
+      <div id="posMsg" class="msg"></div>
+      <details><summary>More (fine adjust, margins)</summary>
+        <div class="mut">Fine adjust the lever with the motor: click Hold, then the arrows, then Mark gauge position.</div>
+        <div class="row"><button id="tqOn">Hold (torque on)</button></div>
+        <div class="row" id="jog"></div>
+        <div class="row">
+          <label>Stop short of the away end (counts)<input id="posMargin" type="number" value="10"></label>
+          <label>Allowed press past the gauge position (counts)<input id="posOver" type="number" value="30"></label>
+          <label style="flex-direction:row;align-items:center;gap:6px"><input id="posWrite" type="checkbox" checked> write the limits into the servo</label>
+        </div>
+        <div class="row">
+          <label>Go to (counts)<input id="goal" type="number" value="2048"></label>
+          <label>Speed<input id="mvSpeed" type="number" value="1000"></label>
+          <label>Accel<input id="mvAcc" type="number" value="5000"></label>
+          <button id="go">Go</button>
+        </div>
+        <div class="mut">4096 counts = 360°, so 1 count = 0.088°.</div>
+      </details>
+      <button class="next" data-go="6">Next →</button>
+    </div>
+
+    <!-- 6 RUN -->
+    <div class="step" id="s6">
+      <h2>5 · Run the test</h2>
+      <div id="cycleSay" class="box" style="border-color:var(--acc)"></div>
+      <h3>Control</h3>
+      <div class="choice">
+        <label><input type="radio" name="mode" value="legacy" checked> Standard (both firmwares)</label>
+        <label><input type="radio" name="mode" value="extension"> RoboNine controller (RoboNine only)</label>
+      </div>
+      <h3>Wobble (optional)</h3>
+      <div class="row">
+        <label>Wobble before each reading<select id="r_wobble_where">
+          <option value="path">on the way to the gauge</option><option value="gauge">at the gauge (touch and lift off)</option></select></label>
+        <label>Wiggles (0 = off)<input id="r_wobble_n" type="number" min="0" max="20"></label>
+        <label>Size (counts)<input id="r_wobble_amp" type="number" min="1"></label>
+      </div>
+      <div class="row">
+        <label>Cycles<input id="r_cycles" type="number"></label>
+        <label style="flex:1">Note (optional)<input id="r_note" placeholder="e.g. 12 V, no load"></label>
+      </div>
+      <div class="row">
+        <button id="runTrial" class="big">1 · Trial (3 cycles)</button>
+        <button id="runStart" class="big green">2 · Full run</button>
+        <button id="runStop">Stop</button>
+      </div>
+      <div id="runMsg" class="msg"></div>
+      <div class="phase" id="phase"></div>
+      <div class="prog"><i id="progBar"></i></div>
+      <div id="progTxt" class="mut"></div>
+      <div id="manualBox" class="box" style="display:none">
+        <b>Type the gauge reading (mm):</b> <input id="manualVal" type="number" step="0.001" style="width:120px"> <button id="manualOk" class="green">Record</button>
+      </div>
+      <h3>Result so far</h3>
+      <div id="liveStats" class="mut">no readings yet</div>
+      <details><summary>Readings table (fix a wrong Qwen value here)</summary>
+        <div class="mut">Type the right value in "correct", or tick ✕ to leave a reading out.</div>
+        <div class="scroll"><table id="rowsTbl"></table></div>
+      </details>
+      <details><summary>Advanced settings (keep the same for every firmware)</summary>
+        <input type="hidden" id="r_mode">
+        <div class="row">
+          <label>Test<select id="r_pattern"><option value="same">Away → gauge (T4.1a)</option><option value="bidirectional">Both sides of the gauge position (T4.2b)</option></select></label>
+          <label>Approach from<select id="r_direction"><option value="+">below (+)</option><option value="-">above (−)</option></select></label>
+          <label>Reading by<select id="r_reader"><option value="qwen">Qwen</option><option value="manual">Me (type each)</option><option value="none">Nobody (encoder only)</option></select></label>
+          <label>Gauge position<input id="r_target" type="number"></label>
+          <label>Back-off distance (counts)<input id="r_offset" type="number"></label>
+        </div>
+        <div class="row">
+          <label>Speed (counts/s)<input id="r_speed" type="number"></label>
+          <label>Accel (counts/s²)<input id="r_accel" type="number"></label>
+          <label>Wait before reading (s)<input id="r_dwell_s" type="number" step="0.1"></label>
+          <label>Arrive tolerance<input id="r_tol" type="number"></label>
+        </div>
+        <div class="row">
+          <label>Move timeout (s)<input id="r_move_timeout_s" type="number" step="0.5"></label>
+          <label>Lever length to probe (mm)<input id="r_lever_r_mm" type="number" step="0.1"></label>
+          <label>Ignore first N cycles<input id="r_skip_first" type="number"></label>
+          <label>Stop above (°C)<input id="r_max_temp_c" type="number"></label>
+        </div>
+        <div id="travelHint" class="mut"></div>
+        <h3>RoboNine controller config (0xA0)</h3>
+        <textarea id="extCfg" class="mono" style="width:100%;height:130px"></textarea>
+        <div class="row"><button id="extSave">Save config</button></div>
+      </details>
+    </div>
+
+    <!-- 7 RESULTS -->
+    <div class="step" id="s7">
+      <h2>Results</h2>
+      <p class="say">Tick runs to compare them. Click a run name to see its readings and pictures.
+        Excel files are in <b>data/</b> and reports in <b>docs/test_reports/</b>.</p>
+      <div class="row"><button id="refreshRuns">Refresh</button></div>
+      <div class="scroll" style="max-height:240px"><table id="runsTbl"></table></div>
+      <h3>Comparison</h3>
+      <div class="scroll" style="max-height:none"><table id="cmpTbl"></table></div>
+      <canvas id="cmpChart" width="900" height="300" style="margin-top:10px"></canvas>
+      <div id="detail" style="margin-top:12px"></div>
+    </div>
+
+    <!-- 8 FIRMWARE -->
+    <div class="step" id="s8">
+      <h2>Change firmware</h2>
+      <div id="fwInfo"></div>
+      <ol class="how">
+        <li>Finish the tests on the current firmware. Keep the servo connected (step 1).</li>
+        <li>Pick the firmware, type <b>FLASH</b> and click <b>Upload to servo</b>. It takes about a minute.
+          The bench backs up the servo settings first and reconnects when it's done.</li>
+        <li>Then redo <b>3 Centre</b> and <b>4 Positions</b>. Keep the run settings the same.</li>
+      </ol>
+      <div class="choice" id="fwChoice">
+        <label><input type="radio" name="fw" value="robonine" checked> <span id="fwRobo">RoboNine v9</span></label>
+        <label><input type="radio" name="fw" value="feetech"> <span id="fwFeet">Feetech factory 3.10</span></label>
+      </div>
+      <div class="row">
+        <button id="fwDownload">Download RoboNine firmware again</button>
+        <label>Type FLASH<input id="fwConfirm" style="width:110px" autocomplete="off"></label>
+        <button id="fwFlash" class="big">Upload to servo</button>
+      </div>
+      <div id="fwMsg" class="msg"></div>
+      <pre id="fwLog" style="max-height:260px;display:none"></pre>
+      <div class="mut">Use stable power, keep only this servo on the bus, and don't unplug anything or close the window during the upload.</div>
+      <details><summary>Manual commands (PowerShell, in the STS32XX-Firmware folder)</summary><pre id="fwCmds"></pre></details>
+    </div>
+  </section>
+
+  <!-- ======================= RIGHT: camera + live ======================= -->
+  <section>
+    <div class="card">
+      <div id="vid" class="vidwrap"><img id="vidImg" alt="camera" src="/video.mjpg"><div id="roiBox"></div></div>
+      <div class="live" id="live"><span class="mut">Connect the servo to see live values.</span></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <canvas id="chart" width="900" height="300"></canvas>
+      <div class="mut">Gauge reading per cycle: <span class="dp">● from below</span> <span class="dm">● from above</span></div>
+    </div>
+  </section>
+</main>
+<div id="zoom"><img alt=""></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const api=async(url,body)=>{const r=await fetch(url,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  let j;try{j=await r.json()}catch(e){j={ok:false,error:'HTTP '+r.status}}return j};
+const fmt=(v,d=3)=>v===null||v===undefined||Number.isNaN(v)?'–':(+v).toFixed(d);
+const good=t=>`<span class="okc">✓ ${t}</span>`, bad=t=>`<span class="err">✗ ${t}</span>`;
+let ST=null, rowsCache=[], selectedRuns=new Set(), runsList=[];
+
+// ---------- steps
+function show(n){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('act',b.dataset.s==n));
+  document.querySelectorAll('.step').forEach(s=>s.classList.toggle('act',s.id==='s'+n));if(n==7)loadRuns();}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>show(b.dataset.s));
+document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>show(b.dataset.go));
+
+$('estop').onclick=async()=>{const j=await api('/api/estop',{});$('runMsg').innerHTML=j.errors&&j.errors.length?bad('E-stop errors: '+j.errors.join('; ')):'<b class="err">E-STOP: torque off</b>';};
+
+// ---------- 1 connect
+async function loadPorts(){const j=await api('/api/ports');$('port').innerHTML=(j.ports||[]).map(p=>`<option value="${p.device}">${p.device} – ${p.desc}</option>`).join('');
+  if(ST)$('port').value=ST.settings.port;}
+$('connect').onclick=async()=>{$('connMsg').textContent='connecting…';const j=await api('/api/connect',{port:$('port').value,baud:+$('baud').value,id:+$('sid').value});
+  $('connMsg').innerHTML=j.ok?good(`Connected. Servo ID ${j.servo.id}, firmware: ${j.servo.firmware_label}`):bad(j.error);};
+$('scan').onclick=async()=>{$('connMsg').textContent='searching…';const j=await api('/api/scan',{});
+  if(!j.ok){$('connMsg').innerHTML=bad(j.error);return;}
+  $('connMsg').innerHTML=j.ids.length?good('Found ID '+j.ids.join(', ')):bad('No servo answered');
+  if(j.ids.length){$('sid').value=j.ids[0];await api('/api/select',{id:j.ids[0]});}};
+$('disconnect').onclick=async()=>{const j=await api('/api/disconnect',{});$('connMsg').innerHTML=j.ok?good('Port released. You can flash now.'):bad(j.error);};
+
+// ---------- 2 camera
+$('camFind').onclick=async()=>{$('camMsg').textContent='searching…';const j=await api('/api/cameras');
+  $('camSel').innerHTML=(j.cameras||[]).map(i=>`<option>${i}</option>`).join('');$('camMsg').textContent=(j.cameras||[]).length+' camera(s) found';};
+$('camOpen').onclick=async()=>{const j=await api('/api/camera',{index:+$('camSel').value});$('camMsg').innerHTML=j.ok?'':bad(j.error);$('vidImg').src='/video.mjpg?'+Date.now();};
+const applyOrient=async()=>{const j=await api('/api/camera/orient',{rotate:+$('camRot').value,flip:$('camFlip').value});
+  $('camMsg').innerHTML=j.ok?(j.roi_cleared?'<span class="warnc">Picture turned. Draw the box again.</span>':''):bad(j.error);};
+$('camRot').onchange=applyOrient;$('camFlip').onchange=applyOrient;
+$('roiClear').onclick=()=>api('/api/roi',{});
+let drawing=false,drag=null;
+$('roiDraw').onclick=()=>{drawing=!drawing;$('vid').classList.toggle('drawing',drawing);$('roiDraw').textContent=drawing?'Now drag on the picture →':'Draw box';};
+function imgRect(){const img=$('vidImg'),r=img.getBoundingClientRect(),nw=img.naturalWidth||16,nh=img.naturalHeight||9;
+  const s=Math.min(r.width/nw,r.height/nh),w=nw*s,h=nh*s;return{x:r.left+(r.width-w)/2,y:r.top+(r.height-h)/2,w,h,ox:(r.width-w)/2,oy:(r.height-h)/2};}
+$('vid').addEventListener('mousedown',e=>{if(!drawing)return;e.preventDefault();const R=imgRect();drag={R,x0:(e.clientX-R.x)/R.w,y0:(e.clientY-R.y)/R.h};});
+window.addEventListener('mousemove',e=>{if(!drag)return;const R=drag.R,x=(e.clientX-R.x)/R.w,y=(e.clientY-R.y)/R.h;
+  drag.roi={x:Math.max(0,Math.min(drag.x0,x)),y:Math.max(0,Math.min(drag.y0,y)),w:Math.abs(x-drag.x0),h:Math.abs(y-drag.y0)};drawRoi(drag.roi);});
+window.addEventListener('mouseup',async()=>{if(!drag)return;const roi=drag.roi;drag=null;drawing=false;$('vid').classList.remove('drawing');$('roiDraw').textContent='Draw box';
+  if(roi&&roi.w>0.01&&roi.h>0.01)await api('/api/roi',roi);});
+function drawRoi(roi){const b=$('roiBox');if(!roi){b.style.display='none';return;}const R=imgRect();
+  Object.assign(b.style,{display:'block',left:(R.ox+roi.x*R.w)+'px',top:(R.oy+roi.y*R.h)+'px',width:(roi.w*R.w)+'px',height:(roi.h*R.h)+'px'});}
+setInterval(()=>{if(ST&&ST.camera_open&&$('s2').classList.contains('act'))$('cropImg').src='/crop.jpg?'+Date.now();},1500);
+$('qwenTest').onclick=async()=>{$('qwenRes').textContent='reading…';$('qwenNote').textContent='';const j=await api('/api/vision/test',{});
+  if(!j.ok){$('qwenRes').innerHTML=bad(j.error);return;}const r=j.result;
+  $('qwenRes').innerHTML=r.value!==null?`${r.raw_text} mm <span class="mut">— same as the gauge?</span>`:bad('could not read');
+  $('qwenNote').textContent=r.notes||'';};
+$('vSave').onclick=async()=>{const j=await api('/api/vision',{url:$('vUrl').value.trim(),model:$('vModel').value.trim()});$('bVis').textContent='Qwen: '+j.vision;};
+
+// ---------- 3 centre
+$('calCenter').onclick=async()=>{if(!confirm('Is the lever pointing straight up and still?'))return;
+  $('calCenterMsg').textContent='setting…';const j=await api('/api/calib/center',{});
+  $('calCenterMsg').innerHTML=j.ok?good(`Done. Servo now reads ${j.pos}.`):bad(j.error);};
+
+// ---------- 4 positions
+$('tqOn').onclick=async()=>{const j=await api('/api/torque',{on:true});$('posMsg').innerHTML=j.ok?'':bad(j.error);};
+$('tqOff').onclick=async()=>{const j=await api('/api/torque',{on:false});$('posMsg').innerHTML=j.ok?'Motor is limp. Move the lever by hand.':bad(j.error);};
+const mark=async w=>{const j=await api('/api/calib/mark',{which:w});$('posMsg').innerHTML=j.ok?good((w==='away'?'Away end = ':'Gauge position = ')+j.pos):bad(j.error);};
+$('markAway').onclick=()=>mark('away');
+$('markGauge').onclick=()=>mark('gauge');
+$('posSave').onclick=async()=>{const j=await api('/api/calib/positions',{margin:+$('posMargin').value,overtravel:+$('posOver').value,write_servo:$('posWrite').checked});
+  if(!j.ok){$('posMsg').innerHTML=bad(j.error);return;}$('posMsg').innerHTML=good('Saved. '+j.message);formLoaded=false;};
+const goTo=async p=>{const j=await api('/api/move',{pos:p,speed:+$('mvSpeed').value,accel:+$('mvAcc').value});$('posMsg').innerHTML=j.ok?'':bad(j.error);};
+$('go').onclick=()=>goTo(+$('goal').value);
+$('jog').innerHTML=[-50,-10,-1,1,10,50].map(d=>`<button data-d="${d}">${d<0?'◀ '+(-d):'+'+d+' ▶'}</button>`).join('');
+$('jog').querySelectorAll('button').forEach(b=>b.onclick=()=>{if(!ST||!ST.telem)return;const p=ST.telem.pos+(+b.dataset.d);$('goal').value=p;goTo(p);});
+
+// ---------- 6 run
+const RF=['mode','pattern','direction','reader','target','offset','cycles','dwell_s','speed','accel','tol','move_timeout_s','lever_r_mm','skip_first','max_temp_c','note','gauge_decimals','wobble_n','wobble_amp','wobble_where'];
+let formLoaded=false;
+const radio=(n,v)=>{const el=document.querySelector(`input[name=${n}][value="${v}"]`);if(el)el.checked=true;};
+function fillForm(s){RF.forEach(k=>{const el=$('r_'+k);if(el&&s.run[k]!==undefined)el.value=s.run[k]??'';});
+  radio('mode',s.run.mode);
+  $('extCfg').value=JSON.stringify(s.ext_config,null,1);
+  $('vUrl').value=s.vision_url||'';$('vModel').value=s.vision_model||'';$('sid').value=s.id;$('baud').value=s.baud;
+  $('camSel').innerHTML=`<option>${s.camera}</option>`;$('camRot').value=s.cam_rotate||0;$('camFlip').value=s.cam_flip||'none';
+  updCycles();updTravel();}
+function formParams(){$('r_mode').value=document.querySelector('input[name=mode]:checked').value;const p={};RF.forEach(k=>p[k]=$('r_'+k).value);return p;}
+function updTravel(){const off=+$('r_offset').value,r=+$('r_lever_r_mm').value,deg=off*360/4096,tg=+$('r_target').value,d=$('r_direction').value==='+'?1:-1;
+  $('travelHint').innerHTML=`Back-off ${off} counts = ${deg.toFixed(1)}°.`;
+  const wn=+$('r_wobble_n').value,wa=+$('r_wobble_amp').value,away=tg-d*off,mid=Math.trunc((away+tg)/2);
+  const wob=wn>0?($('r_wobble_where').value==='gauge'?
+    `, touch the gauge and lift off ${wa} counts <b>${wn}×</b>`:
+    `, wobble ±${wa} counts around ${mid} <b>${wn}×</b>`):'';
+  $('cycleSay').innerHTML=$('r_pattern').value==='same'?
+    `Each cycle: go to <b>${away}</b> (away)${wob}, come back to <b>${tg}</b> (gauge), wait ${$('r_dwell_s').value} s, read the gauge.`:
+    `Each cycle alternates: from <b>${tg-off}</b> to <b>${tg}</b>, then from <b>${tg+off}</b> to <b>${tg}</b>${wob}. The second side presses into the gauge, so the back-off must be small.`;}
+['r_offset','r_lever_r_mm','r_target','r_direction','r_pattern','r_dwell_s','r_wobble_n','r_wobble_amp','r_wobble_where'].forEach(i=>{$(i).addEventListener('input',updTravel);$(i).addEventListener('change',updTravel);});
+const updCycles=()=>$('runStart').textContent=`2 · Full run (${$('r_cycles').value} cycles)`;
+$('r_cycles').addEventListener('input',updCycles);
+$('extSave').onclick=async()=>{try{const j=await api('/api/ext_config',{config:JSON.parse($('extCfg').value)});$('runMsg').innerHTML=j.ok?good('config saved'):bad(j.error);}catch(e){$('runMsg').innerHTML=bad('JSON error: '+e.message);}};
+const startRun=async trial=>{rowsCache=[];const j=await api('/api/run/start',Object.assign(formParams(),trial?{trial:true}:{}));
+  $('runMsg').innerHTML=j.ok?'':bad(j.error);};
+$('runTrial').onclick=()=>startRun(true);
+$('runStart').onclick=()=>startRun(false);
+$('runStop').onclick=()=>api('/api/run/stop',{});
+$('manualOk').onclick=async()=>{await api('/api/run/manual',{value:$('manualVal').value});$('manualVal').value='';};
+$('manualVal').addEventListener('keydown',e=>{if(e.key==='Enter')$('manualOk').click();});
+
+// ---------- stats + tables
+function statsHtml(s){if(!s||!s.groups)return'<span class="mut">no readings yet</span>';
+  let h='<table><tr><th>Approach</th><th>readings</th><th>average mm</th><th>SD mm</th><th>range mm</th><th>SD arcsec</th></tr>';
+  for(const [d,g] of Object.entries(s.groups)){const m=g.gauge_mm,a=g.gauge_arcsec||{};
+    h+=`<tr><td class="${d==='+'?'dp':'dm'}">${d==='+'?'from below':'from above'}</td><td>${m.n||0}${g.pending?' (+'+g.pending+' reading)':''}</td><td>${fmt(m.mean)}</td><td><b>${fmt(m.sd,4)}</b></td><td>${fmt(m.range)}</td><td>${fmt(a.sd,1)}</td></tr>`;}
+  h+='</table>';if(s.lost_motion_mm!==undefined)h+=`<div class="mut" style="margin-top:6px">Difference between the two directions: <b>${fmt(s.lost_motion_mm)} mm</b></div>`;return h;}
+function rowsHtml(rows,runId){let h='<tr><th>#</th><th>cycle</th><th>dir</th><th>pos</th><th>arrive</th><th>mA</th><th>°C</th><th>Qwen</th><th>correct</th><th>✕</th><th>picture</th></tr>';
+  rows.forEach((r,i)=>{const q=r.qwen_status==='pending'?'<span class="warnc">…</span>':(r.qwen_value!==null&&r.qwen_value!==undefined?fmt(r.qwen_value):(r.qwen_status==='error'?'<span class="err" title="'+(r.qwen_notes||'')+'">err</span>':'–'));
+    h+=`<tr><td>${i}</td><td>${r.cycle}</td><td class="${r.dir==='+'?'dp':'dm'}">${r.dir}</td><td>${fmt(r.pos,0)}</td><td class="${r.arrive==='ok'?'':'warnc'}">${r.arrive}</td><td>${fmt(r.current_ma,0)}</td><td>${r.temp??''}</td><td>${q}</td>
+    <td><input data-i="${i}" data-k="m" value="${r.manual_value??''}"></td><td><input type="checkbox" data-i="${i}" data-k="x" ${r.exclude?'checked':''}></td>
+    <td>${r.frame?`<img class="thumb" src="/runs/${runId}/frames/${r.frame}" loading="lazy">`:''}</td></tr>`;});return h;}
+function bindEdits(tbl,runId,rows){tbl.querySelectorAll('input').forEach(el=>el.onchange=async()=>{const i=+el.dataset.i,row=tbl.querySelector(`tr:nth-child(${i+2})`);
+  const m=row.querySelector('input[data-k=m]').value,x=row.querySelector('input[data-k=x]').checked;await api('/api/run/edit',{run_id:runId,idx:i,manual_value:m,exclude:x});
+  rows[i].manual_value=m===''?null:+m;rows[i].exclude=x;});
+  tbl.querySelectorAll('img.thumb').forEach(im=>im.onclick=()=>{$('zoom').querySelector('img').src=im.src;$('zoom').style.display='flex';});}
+$('zoom').onclick=()=>$('zoom').style.display='none';
+
+// ---------- chart
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function plot(canvas,series){const c=canvas,ctx=c.getContext('2d'),W=c.width,H=c.height,P=48;ctx.clearRect(0,0,W,H);
+  const pts=series.flatMap(s=>s.pts);if(!pts.length){ctx.fillStyle=css('--mut');ctx.font='15px sans-serif';ctx.fillText('no readings yet',W/2-50,H/2);return;}
+  let x0=Math.min(...pts.map(p=>p[0])),x1=Math.max(...pts.map(p=>p[0])),y0=Math.min(...pts.map(p=>p[1])),y1=Math.max(...pts.map(p=>p[1]));
+  if(x1===x0)x1=x0+1;if(y1-y0<0.01){const m=(y0+y1)/2;y0=m-0.005;y1=m+0.005;}const pad=(y1-y0)*0.1;y0-=pad;y1+=pad;
+  const X=x=>P+(x-x0)/(x1-x0)*(W-P-12),Y=y=>H-26-(y-y0)/(y1-y0)*(H-40);
+  ctx.strokeStyle=css('--line');ctx.fillStyle=css('--mut');ctx.font='12px sans-serif';ctx.lineWidth=1;
+  for(let i=0;i<=4;i++){const v=y0+(y1-y0)*i/4,y=Y(v);ctx.beginPath();ctx.moveTo(P,y);ctx.lineTo(W-12,y);ctx.stroke();ctx.fillText(v.toFixed(3),2,y+4);}
+  ctx.fillText('cycle',W-40,H-6);
+  series.forEach(s=>{ctx.fillStyle=s.color;s.pts.forEach(p=>{ctx.beginPath();ctx.arc(X(p[0]),Y(p[1]),3.5,0,7);ctx.fill();});});
+  let lx=P+6;series.forEach(s=>{if(!s.label)return;ctx.fillStyle=s.color;ctx.fillRect(lx,6,9,9);ctx.fillStyle=css('--fg');ctx.fillText(s.label,lx+13,15);lx+=ctx.measureText(s.label).width+30;});}
+const val=r=>r.exclude?null:(r.manual_value!==null&&r.manual_value!==undefined&&r.manual_value!==''?+r.manual_value:r.qwen_value);
+function plotRows(canvas,rows){plot(canvas,[{color:css('--plus'),pts:rows.filter(r=>r.dir==='+'&&val(r)!=null).map(r=>[r.cycle,val(r)])},
+  {color:css('--minus'),pts:rows.filter(r=>r.dir==='-'&&val(r)!=null).map(r=>[r.cycle+0.15,val(r)])}]);}
+
+// ---------- 7 results
+async function loadRuns(){const j=await api('/api/runs');runsList=j.runs||[];
+  $('runsTbl').innerHTML='<tr><th>✓</th><th>run</th><th>firmware</th><th>control</th><th>test</th><th>status</th><th>note</th></tr>'+runsList.map(r=>
+    `<tr><td><input type="checkbox" data-r="${r.run_id}" ${selectedRuns.has(r.run_id)?'checked':''}></td><td style="text-align:left"><a href="#" data-open="${r.run_id}" style="color:var(--acc)">${r.run_id}</a></td><td>${r.firmware||''}</td><td>${r.mode==='extension'?'RoboNine':'standard'}</td><td>${r.test_id}</td><td>${r.status}</td><td style="text-align:left">${r.note||''}</td></tr>`).join('');
+  $('runsTbl').querySelectorAll('input').forEach(c=>c.onchange=()=>{c.checked?selectedRuns.add(c.dataset.r):selectedRuns.delete(c.dataset.r);compare();});
+  $('runsTbl').querySelectorAll('a').forEach(a=>a.onclick=e=>{e.preventDefault();openRun(a.dataset.open);});compare();}
+const PAL=['#2563eb','#d97706','#16a34a','#dc2626','#7c3aed','#0d9488','#db2777','#65a30d'];
+async function compare(){const ids=[...selectedRuns];let h='<tr><th>run</th><th>firmware</th><th>control</th><th>dir</th><th>n</th><th>SD mm</th><th>range mm</th><th>±3SD mm</th><th>SD arcsec</th><th>+/− diff mm</th></tr>';
+  const series=[];let k=0;
+  for(const id of ids){const j=await api('/api/runs/'+id);if(!j.ok)continue;const s=j.summary,m=j.meta,col=PAL[k++%PAL.length];
+    for(const [d,g] of Object.entries(s.groups||{})){const a=g.gauge_arcsec||{};h+=`<tr><td style="color:${col}">${id.slice(0,17)}</td><td>${(m.servo||{}).firmware_label||''}</td><td>${m.params.mode==='extension'?'RoboNine':'standard'}</td><td>${d}</td><td>${g.gauge_mm.n||0}</td><td><b>${fmt(g.gauge_mm.sd,4)}</b></td><td>${fmt(g.gauge_mm.range)}</td><td>${fmt(g.gauge_mm.rp3s)}</td><td>${fmt(a.sd,1)}</td><td>${s.lost_motion_mm!==undefined?fmt(s.lost_motion_mm):''}</td></tr>`;}
+    const rows=j.rows,mean=(()=>{const v=rows.map(val).filter(x=>x!=null);return v.length?v.reduce((a,b)=>a+b)/v.length:0})();
+    series.push({color:col,label:((m.servo||{}).firmware_label||'')+' · '+m.params.mode,pts:rows.filter(r=>val(r)!=null).map(r=>[r.cycle,val(r)-mean])});}
+  $('cmpTbl').innerHTML=ids.length?h:'<tr><td class="mut">tick runs above</td></tr>';plot($('cmpChart'),series);}
+async function openRun(id){const j=await api('/api/runs/'+id);if(!j.ok)return;const m=j.meta;
+  $('detail').innerHTML=`<h3>${id}</h3><div class="mut">${(m.servo||{}).firmware_label} · ${m.params.mode} · position ${m.params.target} · ${m.status} ${m.message||''}</div>
+    <div class="row"><button id="fixDec">Fix decimal point (gauge shows 2 decimals)</button><span id="fixMsg" class="mut"></span></div>${statsHtml(j.summary)}<div class="scroll" style="margin-top:8px"><table id="detTbl"></table></div><div class="mut">${m.data_dir?`Excel: ${m.data_dir}/run.xlsx · Report: ${m.report}`:'still running'}</div>`;
+  $('detTbl').innerHTML=rowsHtml(j.rows,id);bindEdits($('detTbl'),id,j.rows);
+  $('fixDec').onclick=async()=>{$('fixMsg').textContent='fixing…';const k=await api('/api/run/decimals',{run_id:id,decimals:2});
+    if(!k.ok){$('fixMsg').innerHTML=bad(k.error);return;}await openRun(id);$('fixMsg').innerHTML=good(`${k.fixed} readings fixed. Excel and report updated.`);compare();};}
+$('refreshRuns').onclick=loadRuns;
+
+// ---------- 8 firmware
+function fwHtml(s){if(!s)return'<p class="say">Connect a servo to see its firmware.</p>';const e=s.extension;
+  return `<div class="nums"><div class="num"><b>${s.firmware_label}</b><span>on the servo now</span></div><div class="num"><b>${e?e.magic+' '+e.major+'.'+e.minor:'none'}</b><span>RoboNine extension</span></div><div class="num"><b>${s.min_limit}..${s.max_limit}</b><span>limits in servo</span></div></div>`;}
+const FWCMD=p=>`# one-time setup
+python -m venv tools\\flash\\.venv
+tools\\flash\\.venv\\Scripts\\python -m pip install -r tools\\flash\\requirements.txt
+
+# back up this servo's settings first
+tools\\flash\\.venv\\Scripts\\python tools\\flash\\settings.py backup --port ${p} --id 1 --file backups\\servo-1-settings.json
+
+# Feetech -> RoboNine
+#   download the CUSTOM firmware ZIP (Assets) from
+#   https://github.com/roboninecom/STS32XX-Firmware/releases/tag/v0.1-preview
+#   and extract it into tools\\flash\\releases\\custom\\
+tools\\flash\\.venv\\Scripts\\python tools\\flash\\flash.py flash --manifest tools\\flash\\releases\\custom\\release.json --port ${p} --id 1
+
+# RoboNine -> Feetech factory 3.10 (servo alone on the bus)
+tools\\flash\\.venv\\Scripts\\python tools\\flash\\flash.py flash --manifest tools\\flash\\factory\\release.json --port ${p} --id 1`;
+
+async function fwStatus(){const j=await api('/api/fw/status');if(!j.ok)return;const r=j.releases;
+  $('fwRobo').innerHTML=`RoboNine v9 <span class="mut">${r.robonine.present?'('+r.robonine.release+')':'(not downloaded)'}</span>`;
+  $('fwFeet').innerHTML=`Feetech factory 3.10 <span class="mut">${r.feetech.present?'(bundled)':'(missing)'}</span>`;}
+fwStatus();
+$('fwDownload').onclick=async()=>{$('fwMsg').textContent='downloading…';const j=await api('/api/fw/download',{});
+  $('fwMsg').innerHTML=j.ok?good('RoboNine firmware downloaded'):bad(j.error);fwStatus();};
+$('fwFlash').onclick=async()=>{const which=document.querySelector('input[name=fw]:checked').value;
+  if(ST&&ST.servo&&ST.servo.firmware_family===which&&!confirm('The servo already runs this firmware. Flash it again?'))return;
+  const j=await api('/api/fw/flash',{which,confirm:$('fwConfirm').value,firmware_before:ST&&ST.servo?ST.servo.firmware_label:null});
+  $('fwConfirm').value='';$('fwMsg').innerHTML=j.ok?'Uploading…':bad(j.error);};
+function fwJobView(f){if(!f)return;$('fwLog').style.display='block';$('fwLog').textContent=f.log.join('\n');$('fwLog').scrollTop=1e9;
+  $('fwMsg').innerHTML=f.state==='running'?'<b class="warnc">Uploading. Don\'t unplug anything.</b>':
+    f.state==='done'?good(`Done. Servo now runs ${f.firmware_after}. Redo 3 Centre and 4 Positions.`)+(f.note?`<br><span class="warnc">${f.note}</span>`:''):
+    bad(f.error||'failed');}
+
+// ---------- poll
+let lastRunId=null;
+function markDone(n,done){document.querySelector(`nav button[data-s="${n}"]`).classList.toggle('done',!!done);}
+async function poll(){const j=await api('/api/state?since='+(rowsCache.length));if(!j.ok)return;ST=j;const s=j.servo,t=j.telem,c=j.calib||{};
+  if(!formLoaded){fillForm(j.settings);loadPorts();formLoaded=true;}
+  $('appVer').textContent='v'+j.version;fwJobView(j.fw_job);$('fwFlash').disabled=j.running;$('fwDownload').disabled=j.running;
+  $('bConn').textContent=j.connected&&s?`servo: ${j.settings.port} · ID ${s.id}`:'servo: not connected';$('bConn').className='chip'+(j.connected&&s?' on':'');
+  $('bFw').textContent=s?s.firmware_label:'firmware ?';$('bVis').textContent='Qwen: '+(j.vision_key?'ready':'no key');$('bVis').className='chip'+(j.vision_key?' on':'');
+  $('live').innerHTML=t?[['position',t.pos],['°C',t.temp],['mA',t.current_ma],['V',t.voltage],['torque',t.torque?'on':'off']].map(([k,v])=>`<span><b>${v}</b> <span class="mut">${k}</span></span>`).join(''):
+    `<span class="${j.telem_err?'err':'mut'}">${j.telem_err||'Connect the servo to see live values.'}</span>`;
+  // step ticks
+  markDone(1,j.connected&&s);markDone(2,j.camera_open&&j.settings.roi);markDone(3,c.center_ok);markDone(4,c.positions_saved);
+  $('pAway').textContent=c.away_pos??'–';$('pGauge').textContent=c.gauge_pos??'–';$('tgNow').textContent=t?t.pos:'–';
+  $('fwInfo').innerHTML=fwHtml(s);$('fwCmds').textContent=FWCMD(j.settings.port);
+  if(j.settings.roi&&!drag)drawRoi(j.settings.roi);else if(!drag)drawRoi(null);
+  if(!j.camera_open&&j.camera_error)$('camMsg').innerHTML=bad(j.camera_error);
+  const r=j.run;
+  ['runStart','runTrial','calCenter','connect','tqOn','tqOff','go','scan','disconnect','markAway','markGauge','posSave'].forEach(id=>$(id).disabled=j.running);
+  if(!r){$('phase').textContent='';return;}
+  if(r.run_id!==lastRunId){rowsCache=[];lastRunId=r.run_id;const jj=await api('/api/state?since=0');r.rows=jj.run.rows;}
+  if(rowsCache.some(x=>x.qwen_status==='pending')){const jj=await api('/api/runs/'+r.run_id);if(jj.ok)rowsCache=jj.rows;}else rowsCache=rowsCache.concat(r.rows);
+  const word={running:'RUNNING',done:'DONE',stopped:'STOPPED',error:'ERROR'}[r.state]||r.state.toUpperCase();
+  $('phase').innerHTML=`<span class="${r.state==='error'?'err':r.state==='done'?'okc':''}">${r.trial?'Trial: ':''}${word}</span>`;
+  $('progBar').style.width=(100*r.cycle/r.total)+'%';
+  const lt=r.last_tel||{};
+  $('progTxt').innerHTML=`Cycle ${r.cycle} of ${r.total}`+(lt.temp!==undefined?` · ${lt.temp} °C · ${lt.current_ma!=null?lt.current_ma+' mA':''} · ${lt.voltage} V`:'')+
+    (r.message?`<br><span class="warnc">${r.message}</span>`:'')+
+    (r.trial&&r.state==='done'?`<br><b class="okc">Trial finished.</b> If the readings below match the gauge, click <b>2 · Full run</b>.`:'')+
+    (!r.trial&&r.data_dir?`<br><span class="okc">Saved to ${r.data_dir}/run.xlsx</span>`:'');
+  $('manualBox').style.display=r.awaiting_manual!==null&&r.awaiting_manual!==undefined?'block':'none';
+  $('liveStats').innerHTML=statsHtml(r.summary);
+  if(!document.activeElement||document.activeElement.closest('#rowsTbl')===null){$('rowsTbl').innerHTML=rowsHtml(rowsCache,r.run_id);bindEdits($('rowsTbl'),r.run_id,rowsCache);
+    const sc=$('rowsTbl').parentElement;if(j.running)sc.scrollTop=sc.scrollHeight;}
+  plotRows($('chart'),rowsCache);
+}
+setInterval(poll,500);poll();
+</script>
+</body>
+</html>

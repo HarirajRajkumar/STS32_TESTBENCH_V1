@@ -1,0 +1,10 @@
+# local machine state (calibration, camera, positions) - created on first start
+settings.json
+# Google Drive sync files
+desktop.ini
+# legacy run folder (runs now go to 01_JOINTX-SO-101/data, outside this repo)
+data/
+__pycache__/
+*.pyc
+*.log
+.venv/

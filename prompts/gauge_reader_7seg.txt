@@ -1,0 +1,6 @@
+<seven_segment_rules>
+Each digit is a 7-segment figure: top (a), upper-right (b), lower-right (c), bottom (d), lower-left (e), upper-left (f), MIDDLE (g).
+For EVERY digit, decide first whether the MIDDLE segment (g) is dark. 0 has NO middle segment; 8 HAS one. 6 vs 5: 6 has the lower-left (e) segment.
+Do not let glare hide a segment: compare each digit with its neighbours.
+If the display shows letters (e.g. "OFF", "Err"), is blank, or is not a number: set unreadable true and value null.
+</seven_segment_rules>

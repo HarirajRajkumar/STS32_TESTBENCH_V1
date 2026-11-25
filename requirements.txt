@@ -1,0 +1,6 @@
+flask>=3.0
+pyserial>=3.5
+opencv-python>=4.8
+numpy>=1.26
+openpyxl>=3.1
+pywebview>=5.0
