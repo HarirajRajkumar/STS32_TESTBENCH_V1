@@ -16,10 +16,10 @@ import camera as camlib
 import stats
 import storage
 from runner import Run
-from sts import DEFAULT_EXT_CONFIG, R_LOCK, Bus, BusError
+from sts import DEFAULT_EXT_CONFIG, MIN_SUPPLY_V, R_LOCK, Bus, BusError
 from vision import QwenReader, api_key, apply_decimals, fixed_decimals
 
-APP_VERSION = "1.4.1"     # 1.4.1: model read from regs 3-4, firmware tab explains detection + supply check
+APP_VERSION = "1.4.2"     # 1.4.2: refuse calibration/motion/flash without motor supply; no-power label
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(HERE, "settings.json")
 FLASH_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "firmware", "STS32XX-Firmware", "STS32XX-Firmware",
@@ -109,6 +109,19 @@ def ok(**kw):
 
 def fail(msg, code=400):
     return jsonify(ok=False, error=msg), code
+
+
+def no_power():
+    """Fresh voltage read. Without the motor supply the servo chip runs on signal-line leakage: its position,
+    model and limit registers read garbage, so calibrating or flashing then would store garbage."""
+    try:
+        v = S.bus.telemetry(S.settings["id"])["voltage"]
+    except Exception as e:
+        return fail("cannot read the servo: %s" % e)
+    if v < MIN_SUPPLY_V:
+        return fail("No motor power: the servo reads %.1f V. Switch on the 12 V supply (check the plug and the "
+                    "current limit), then Connect again." % v)
+    return None
 
 
 def body():
@@ -225,6 +238,8 @@ def torque():
     if not S.servo_info or S.running():
         return fail("not connected / run active")
     on = bool(body().get("on"))
+    if on and (np := no_power()):
+        return np
     try:
         if on:
             S.bus.legacy_hold_here(S.settings["id"])
@@ -239,6 +254,8 @@ def torque():
 def move():
     if not S.servo_info or S.running():
         return fail("not connected / run active")
+    if (np := no_power()):
+        return np
     b = body()
     pos = int(b["pos"])
     if not S.settings["soft_min"] <= pos <= S.settings["soft_max"]:
@@ -257,6 +274,8 @@ def calib_center():
     """Step 1: lever pointing straight up -> this position becomes 2048 (saved in the servo)."""
     if not S.servo_info or S.running():
         return fail("not connected / run active")
+    if (np := no_power()):
+        return np
     try:
         pos, corr = S.bus.calibrate_center(S.settings["id"])
     except BusError as e:
@@ -277,6 +296,8 @@ def calib_sweep():
     """Step 2: torque off, move the lever by hand back to its stop and forward onto the gauge; min/max are tracked."""
     if not S.servo_info or S.running():
         return fail("not connected / run active")
+    if (np := no_power()):
+        return np
     act = body().get("action")
     if act == "start":
         try:
@@ -318,6 +339,8 @@ def calib_mark():
     """Positions step: torque off, lever placed by hand. which = away (far end, away from the gauge) | gauge."""
     if not S.servo_info or S.running():
         return fail("not connected / run active")
+    if (np := no_power()):
+        return np
     which = body().get("which")
     if which not in ("away", "gauge"):
         return fail("which = away | gauge")
@@ -339,6 +362,8 @@ def calib_positions():
     approach direction = from the away side, limits = away end .. gauge + overtravel."""
     if not S.servo_info or S.running():
         return fail("not connected / run active")
+    if (np := no_power()):
+        return np
     b = body()
     away, gauge = S.calib.get("away_pos"), S.calib.get("gauge_pos")
     if away is None or gauge is None:
@@ -468,6 +493,8 @@ def run_start():
         return fail("a run is already active")
     if not S.servo_info:
         return fail("connect the servo first")
+    if (np := no_power()):
+        return np
     p = dict(S.settings["run"])
     p.update(body())
     trial = bool(p.pop("trial", False))
@@ -753,6 +780,8 @@ def fw_flash():
         return fail("firmware file missing: download it first")
     if not S.servo_info:
         return fail("connect the servo first (step 1)")
+    if (np := no_power()):
+        return np
     sid, port, baud = S.settings["id"], S.settings["port"], S.settings["baud"]
     try:                                     # flash.py requires: torque off, settings locked, no alarm
         S.bus.torque(sid, False)

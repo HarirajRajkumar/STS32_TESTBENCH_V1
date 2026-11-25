@@ -19,6 +19,7 @@ R_FW_MAJOR, R_FW_MINOR, R_MODEL_MINOR, R_MODEL_MAJOR = 0x00, 0x01, 0x02, 0x03
 R_MIN_LIMIT, R_MAX_LIMIT = 0x09, 0x0B
 R_TORQUE, R_ACC, R_GOAL_POS = 0x28, 0x29, 0x2A
 R_POS_CORRECTION, R_LOCK = 0x1F, 0x37
+MIN_SUPPLY_V = 6.0             # below this the motor supply is off: refuse calibration, motion and flashing
 R_PRESENT_POS = 0x38           # 0x38..0x46 read as one block (15 bytes) for telemetry
 R_MOVING = 0x42
 
@@ -187,7 +188,15 @@ class Bus:
                     min_limit=lim[0] | lim[1] << 8, max_limit=lim[2] | lim[3] << 8)
         caps = self.ext_caps(sid)
         info["extension"] = caps
-        if caps and caps["magic"] == "ARMC":
+        try:
+            info["voltage"] = self.telemetry(sid)["voltage"]
+        except BusError:
+            info["voltage"] = None
+        if info["voltage"] is not None and info["voltage"] < MIN_SUPPLY_V and not caps:
+            # chip alive on signal-line leakage only: registers are garbage and the extension cannot answer
+            info["firmware_family"] = "unknown"
+            info["firmware_label"] = "No motor power (%.1f V)" % info["voltage"]
+        elif caps and caps["magic"] == "ARMC":
             info["firmware_family"] = "robonine"
             info["firmware_label"] = "RoboNine v%d.%d (fw %s)" % (caps["major"], caps["minor"], info["fw"])
         else:

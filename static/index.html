@@ -522,7 +522,9 @@ async function poll(){const j=await api('/api/state?since='+(rowsCache.length));
   if(!formLoaded){fillForm(j.settings);loadPorts();formLoaded=true;}
   $('appVer').textContent='v'+j.version;fwJobView(j.fw_job);$('fwFlash').disabled=j.running;$('fwDownload').disabled=j.running;
   $('bConn').textContent=j.connected&&s?`servo: ${j.settings.port} · ID ${s.id}`:'servo: not connected';$('bConn').className='chip'+(j.connected&&s?' on':'');
-  $('bFw').textContent=s?s.firmware_label:'firmware ?';$('bVis').textContent='Qwen: '+(j.vision_key?'ready':'no key');$('bVis').className='chip'+(j.vision_key?' on':'');
+  $('bFw').textContent=s?s.firmware_label:'firmware ?';
+  const lowV=t&&t.voltage<6;$('bFw').style.cssText=lowV||(s&&s.firmware_family==='unknown')?'background:#fee2e2;color:#991b1b;font-weight:600':'';
+  if(lowV)$('bFw').textContent=`NO MOTOR POWER (${t.voltage} V)`;$('bVis').textContent='Qwen: '+(j.vision_key?'ready':'no key');$('bVis').className='chip'+(j.vision_key?' on':'');
   $('live').innerHTML=t?[['position',t.pos],['°C',t.temp],['mA',t.current_ma],['V',t.voltage],['torque',t.torque?'on':'off']].map(([k,v])=>`<span><b>${v}</b> <span class="mut">${k}</span></span>`).join(''):
     `<span class="${j.telem_err?'err':'mut'}">${j.telem_err||'Connect the servo to see live values.'}</span>`;
   // step ticks
