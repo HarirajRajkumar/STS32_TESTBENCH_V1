@@ -292,7 +292,8 @@ class Run:
             if item is None:
                 return
             idx, jpg = item
-            res = apply_decimals(self.app.reader.read(jpg), self.p.get("gauge_decimals"))
+            dec = self.p.get("gauge_decimals")
+            res = apply_decimals(self.app.reader.read(jpg, dec), dec)
             with self.lock:
                 r = self.rows[idx]
                 r.update(qwen_status=res["status"], qwen_value=res["value"], qwen_raw=res.get("raw_text"),

@@ -172,7 +172,7 @@ class FakeReader:
     def describe(self):
         return "fake"
 
-    def read(self, jpg):
+    def read(self, jpg, decimals=None):
         time.sleep(0.01)
         v = round(1.20 + self.rng.normal(0, 0.004), 3)
         return dict(status="ok", value=v, raw_text="%.2f" % v, confidence="high", unreadable=False, notes="", ms=10)

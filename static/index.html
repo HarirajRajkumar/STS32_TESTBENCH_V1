@@ -116,7 +116,7 @@ pre{background:var(--soft);border-radius:8px;padding:10px;overflow:auto;font-siz
         <li>Click <b>Test read</b>. The number must match the gauge.</li>
       </ol>
       <div class="row"><label>Digits after the point on the gauge<select id="r_gauge_decimals" onchange="api('/api/run/defaults',{gauge_decimals:this.value===''?null:+this.value})">
-        <option value="">as Qwen reads it</option><option value="1">1 (0.9)</option><option value="2">2 (0.99)</option><option value="3">3 (0.999)</option></select></label></div>
+        <option value="">off: keep Qwen's text (not recommended)</option><option value="1">1 (0.9)</option><option value="2">2 (0.99)</option><option value="3">3 (0.999)</option></select></label></div>
       <div class="row">
         <label>Camera<select id="camSel"><option>0</option></select></label>
         <button id="camFind">Find</button>
@@ -335,7 +335,10 @@ pre{background:var(--soft);border-radius:8px;padding:10px;overflow:auto;font-siz
 const $=id=>document.getElementById(id);
 const api=async(url,body)=>{const r=await fetch(url,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   let j;try{j=await r.json()}catch(e){j={ok:false,error:'HTTP '+r.status}}return j};
-const fmt=(v,d=3)=>v===null||v===undefined||Number.isNaN(v)?'–':(+v).toFixed(d);
+const fmt=(v,d=3)=>v===null||v===undefined||v===''||Number.isNaN(+v)?'–':(+v).toFixed(d);
+// gauge readings always shown with the gauge's own number of decimals (default 2 -> x.xx)
+const gDec=()=>{const d=ST&&ST.settings&&ST.settings.run.gauge_decimals;return d===null||d===undefined||d===''?2:+d;};
+const fmtG=v=>fmt(v,gDec());
 const good=t=>`<span class="okc">✓ ${t}</span>`, bad=t=>`<span class="err">✗ ${t}</span>`;
 let ST=null, rowsCache=[], selectedRuns=new Set(), runsList=[];
 
@@ -380,7 +383,7 @@ function drawRoi(roi){const b=$('roiBox');if(!roi){b.style.display='none';return
 setInterval(()=>{if(ST&&ST.camera_open&&$('s2').classList.contains('act'))$('cropImg').src='/crop.jpg?'+Date.now();},1500);
 $('qwenTest').onclick=async()=>{$('qwenRes').textContent='reading…';$('qwenNote').textContent='';const j=await api('/api/vision/test',{});
   if(!j.ok){$('qwenRes').innerHTML=bad(j.error);return;}const r=j.result;
-  $('qwenRes').innerHTML=r.value!==null?`${r.raw_text} mm <span class="mut">— same as the gauge?</span>`:bad('could not read');
+  $('qwenRes').innerHTML=r.value!==null?`${fmtG(r.value)} mm <span class="mut">— same as the gauge?${String(r.raw_text)!==fmtG(r.value)?' (Qwen saw "'+r.raw_text+'")':''}</span>`:bad('could not read');
   $('qwenNote').textContent=r.notes||'';};
 $('vSave').onclick=async()=>{const j=await api('/api/vision',{url:$('vUrl').value.trim(),model:$('vModel').value.trim()});$('bVis').textContent='Qwen: '+j.vision;};
 
@@ -441,7 +444,7 @@ function statsHtml(s){if(!s||!s.groups)return'<span class="mut">no readings yet<
     h+=`<tr><td class="${d==='+'?'dp':'dm'}">${d==='+'?'from below':'from above'}</td><td>${m.n||0}${g.pending?' (+'+g.pending+' reading)':''}</td><td>${fmt(m.mean)}</td><td><b>${fmt(m.sd,4)}</b></td><td>${fmt(m.range)}</td><td>${fmt(a.sd,1)}</td></tr>`;}
   h+='</table>';if(s.lost_motion_mm!==undefined)h+=`<div class="mut" style="margin-top:6px">Difference between the two directions: <b>${fmt(s.lost_motion_mm)} mm</b></div>`;return h;}
 function rowsHtml(rows,runId){let h='<tr><th>#</th><th>cycle</th><th>dir</th><th>pos</th><th>arrive</th><th>mA</th><th>°C</th><th>Qwen</th><th>correct</th><th>✕</th><th>picture</th></tr>';
-  rows.forEach((r,i)=>{const q=r.qwen_status==='pending'?'<span class="warnc">…</span>':(r.qwen_value!==null&&r.qwen_value!==undefined?fmt(r.qwen_value):(r.qwen_status==='error'?'<span class="err" title="'+(r.qwen_notes||'')+'">err</span>':'–'));
+  rows.forEach((r,i)=>{const q=r.qwen_status==='pending'?'<span class="warnc">…</span>':(r.qwen_value!==null&&r.qwen_value!==undefined&&r.qwen_value!==''?`<span title="Qwen saw: ${r.qwen_raw??''}">${fmtG(r.qwen_value)}</span>`:(r.qwen_status==='error'?'<span class="err" title="'+(r.qwen_notes||'')+'">err</span>':'–'));
     h+=`<tr><td>${i}</td><td>${r.cycle}</td><td class="${r.dir==='+'?'dp':'dm'}">${r.dir}</td><td>${fmt(r.pos,0)}</td><td class="${r.arrive==='ok'?'':'warnc'}">${r.arrive}</td><td>${fmt(r.current_ma,0)}</td><td>${r.temp??''}</td><td>${q}</td>
     <td><input data-i="${i}" data-k="m" value="${r.manual_value??''}"></td><td><input type="checkbox" data-i="${i}" data-k="x" ${r.exclude?'checked':''}></td>
     <td>${r.frame?`<img class="thumb" src="/runs/${runId}/frames/${r.frame}" loading="lazy">`:''}</td></tr>`;});return h;}

@@ -97,12 +97,16 @@ class QwenReader:
     def describe(self):
         return "%s @ %s" % (self.model, self.url)
 
-    def read(self, jpg_bytes):
-        """Never raises. -> dict(status ok|error, value, raw_text, confidence, unreadable, notes, ms)."""
+    def read(self, jpg_bytes, decimals=None):
+        """Never raises. -> dict(status ok|error, value, raw_text, confidence, unreadable, notes, ms).
+        decimals is accepted but deliberately NOT put into the prompt: tested 2026-11-25 on real frames, a
+        'format X.XX' hint made Qwen pad 1.00 to '10.00' (stored as 10.00). Without the hint its digits are
+        consistent ('099', '100', '10.1') and apply_decimals() places the point correctly (0.99, 1.00, 1.01)."""
         t0 = time.monotonic()
+        prompt = self.prompt
         body = {"model": self.model, "temperature": 0, "max_tokens": 4000 if self.thinking else 400,
                 "messages": [{"role": "user", "content": [
-                    {"type": "text", "text": self.prompt},
+                    {"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," +
                                                         base64.b64encode(jpg_bytes).decode("ascii")}}]}]}
         if not self.thinking:

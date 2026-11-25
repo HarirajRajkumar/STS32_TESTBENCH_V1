@@ -19,7 +19,7 @@ from runner import Run
 from sts import DEFAULT_EXT_CONFIG, MIN_SUPPLY_V, R_LOCK, Bus, BusError
 from vision import QwenReader, api_key, apply_decimals, fixed_decimals
 
-APP_VERSION = "1.5.0"     # 1.5.0: restore servo settings from a backup (Firmware tab)
+APP_VERSION = "1.5.1"     # 1.5.1: gauge readings always shown as x.xx; Qwen raw text shown alongside
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(HERE, "settings.json")
 FLASH_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "firmware", "STS32XX-Firmware", "STS32XX-Firmware",
@@ -474,7 +474,9 @@ def vision_test():
     if img is None:
         return fail("camera is not open")
     jpg = camlib.jpeg_bytes(camlib.crop_roi(img, S.settings.get("roi")))
-    res = apply_decimals(S.reader.read(jpg), S.settings["run"].get("gauge_decimals"))
+    dec = S.settings["run"].get("gauge_decimals")
+    res = apply_decimals(S.reader.read(jpg, dec), dec)
+    res["decimals"] = dec
     res["crop_b64"] = base64.b64encode(jpg).decode("ascii")
     return ok(result=res)
 
