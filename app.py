@@ -20,7 +20,8 @@ from runner import Run
 from sts import DEFAULT_EXT_CONFIG, MIN_SUPPLY_V, R_LOCK, Bus, BusError
 from vision import QwenReader, api_key, apply_decimals, fixed_decimals
 
-APP_VERSION = "1.7.0"     # 1.7.0: Hold & PID test tab (hold.py)
+APP_VERSION = "1.7.1"     # 1.7.1: temperature limit needs a confirmed reading (bad single reads no longer stop a hold or run)
+                          # 1.7.0: Hold & PID test tab (hold.py)
                           # 1.6.0: interactive plotly charts (hover = camera picture) live, per run, comparison + <run>_interactive.html reports
                           # 1.5.1: gauge readings always shown as x.xx; Qwen raw text shown alongside
 HERE = os.path.dirname(os.path.abspath(__file__))

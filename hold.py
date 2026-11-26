@@ -248,6 +248,7 @@ class HoldTest:
             self.init_t = round(time.monotonic() - self.t0, 3)
             self.state = "running"
             self.phase = "holding %d" % self.base
+            over_since = None
             side, next_step = 1, time.monotonic() + max(2.0, per_side)   # let the first move settle before stepping
             while not self.stop_ev.is_set():
                 now = time.monotonic()
@@ -267,9 +268,15 @@ class HoldTest:
                     side = -side
                     next_step = now + per_side
                 r = self._poll()
+                # a single high reading is a bad read (the sensor sometimes returns 76 / 150 C); real heating is slow,
+                # so stop only when the temperature stays at or above the limit for 1 s
                 if r["temp"] is not None and r["temp"] >= p["max_temp_c"]:
-                    self.message = "temperature %s C >= limit %s C" % (r["temp"], p["max_temp_c"])
-                    break
+                    over_since = over_since or now
+                    if now - over_since >= 1.0:
+                        self.message = "temperature %s C >= limit %s C for 1 s" % (r["temp"], p["max_temp_c"])
+                        break
+                else:
+                    over_since = None
                 time.sleep(0.005)
             self.state = "stopped"
         except BusError as e:

@@ -160,6 +160,18 @@ class Run:
                 return r
         return "ok"
 
+    def _temp_confirmed(self, limit):
+        """The temperature sensor sometimes returns a single wrong value (76 / 150 C while the servo is at 36 C).
+        Stop only if three more reads over 0.4 s are also at or above the limit."""
+        for _ in range(3):
+            time.sleep(0.2)
+            try:
+                if self.app.bus.telemetry(self.p["id"])["temp"] < limit:
+                    return False
+            except BusError:
+                return False
+        return True
+
     def _dwell(self, s, goal):
         end = time.monotonic() + s
         while time.monotonic() < end and not self.stop_ev.is_set():
@@ -206,7 +218,7 @@ class Run:
                     if self.ext:
                         fb = self._poll("sample", target)
                         tel["pos"] = round(fb["pos"], 2)
-                    if tel["temp"] >= p["max_temp_c"]:
+                    if tel["temp"] >= p["max_temp_c"] and self._temp_confirmed(p["max_temp_c"]):
                         self.message = "temperature %d C >= limit %d C" % (tel["temp"], p["max_temp_c"])
                         self.stop_ev.set()
                     row = dict(run_id=self.run_id, cycle=c, dir=d, t_iso=dt.datetime.now().isoformat(timespec="milliseconds"),
