@@ -5,7 +5,7 @@ One cycle per direction d (+1 / -1):
     -> read encoder/telemetry -> grab a fresh camera frame -> save crop -> queue Qwen read (background).
 Motion never waits for Qwen unless reader == 'manual'.
 Every telemetry poll (moves ~60 Hz, dwell 20 Hz) goes to telemetry.csv: temperature, current, voltage, load, position.
-Files are written to local staging during the run and moved to data/<test>/<run>/ + docs/test_reports at the end.
+Files are written to local staging during the run and moved to data/<test>/<run>/ + docs/test_reports/repeatability at the end.
 """
 import csv
 import datetime as dt
@@ -324,6 +324,7 @@ class Run:
                     awaiting_manual=self.awaiting_manual, trial=bool(self.p.get("trial")),
                     planned_cycles=self.p.get("planned_cycles"), qwen_backlog=self.q.qsize(), last_tel=self.last_tel,
                     data_dir=storage.rel(self.final_dir, storage.PROJECT) if self.final_dir else None,
-                    report=("docs/test_reports/%s.md" % self.run_id) if self.final_dir else None,
+                    report=storage.rel(os.path.join(storage.report_dir(self.test_id, self.p.get("trial")), self.run_id + ".md"),
+                                       storage.PROJECT) if self.final_dir else None,
                     summary=stats.summarise(all_rows, float(self.p.get("lever_r_mm") or 0),
                                             int(self.p.get("skip_first") or 0)))

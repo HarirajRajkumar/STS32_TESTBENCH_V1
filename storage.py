@@ -22,6 +22,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.path.normpath(os.path.join(HERE, "..", ".."))          # 01_JOINTX-SO-101
 DATA_ROOT = os.path.join(PROJECT, "data")
 REPORT_DIR = os.path.join(PROJECT, "docs", "test_reports")
+
+
+def report_dir(test_id, trial=False):
+    """Reports are sorted by kind so nothing is mixed:
+        hold-pid/                 Hold & PID tests (T5-hold)
+        repeatability/            up/down repeatability runs (T4.1a, T4.2b)
+        repeatability/trials/     their 3-cycle trial runs
+    00_library.html in REPORT_DIR lists all of them; assets/plotly.min.js is shared."""
+    if test_id == "T5-hold":
+        return os.path.join(REPORT_DIR, "hold-pid")
+    return os.path.join(REPORT_DIR, "repeatability", "trials") if trial else os.path.join(REPORT_DIR, "repeatability")
 STAGING = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.join(HERE, "_local"), "sts-bench", "staging")
 OLD_RUNS = os.path.join(HERE, "data", "runs")                         # layout before 2026-11-25 (migrated)
 
@@ -100,7 +111,7 @@ def write_samples(run_dir, rows):
     os.replace(tmp, os.path.join(run_dir, "samples.csv"))
 
 
-_NUM = {"cycle": int, "target": float, "approach_from": float, "pos": float, "err_counts": float, "current_ma": float,
+_NUM = {"err": float, "cycle": int, "target": float, "approach_from": float, "pos": float, "err_counts": float, "current_ma": float,
         "load": float, "temp": float, "voltage": float, "arrive_ms": float, "qwen_value": float, "qwen_ms": float,
         "manual_value": float, "value_mm": float, "t_s": float, "goal": float, "speed": float, "current_raw": float,
         "moving": float}
@@ -247,10 +258,11 @@ def _f(v, d=3):
 
 
 def write_report(run_dir, meta, rows, summ, cond, qs):
-    os.makedirs(REPORT_DIR, exist_ok=True)
     p, sv = meta.get("params", {}), meta.get("servo") or {}
+    rd = report_dir(meta.get("test_id"), p.get("trial"))
+    os.makedirs(rd, exist_ok=True)
     rid = meta["run_id"]
-    data_rel = rel(run_dir, REPORT_DIR)
+    data_rel = rel(run_dir, rd)
     L = ["# %s · %s · %s" % (meta.get("test_id"), sv.get("firmware_label", "?"), p.get("mode")), "",
          "| | |", "|---|---|",
          "| Run | `%s` |" % rid,
@@ -308,7 +320,7 @@ def write_report(run_dir, meta, rows, summ, cond, qs):
           "* [samples.csv](%s/samples.csv) · [telemetry.csv](%s/telemetry.csv) · [meta.json](%s/meta.json) · "
           "[frames/](%s/frames/)" % (data_rel, data_rel, data_rel, data_rel),
           "* Interactive report (hover a point to see its picture): [%s_interactive.html](%s_interactive.html)" % (rid, rid), ""]
-    with open(os.path.join(REPORT_DIR, rid + ".md"), "w", encoding="utf-8") as f:
+    with open(os.path.join(rd, rid + ".md"), "w", encoding="utf-8") as f:
         f.write("\n".join(L))
 
 
@@ -334,7 +346,9 @@ def write_interactive_report(run_dir, meta, rows, summ, cond, qs):
     with open(os.path.join(HERE, "static", "benchplot.js"), encoding="utf-8") as f:
         benchplot = f.read()
     p, sv, rid = meta.get("params", {}), meta.get("servo") or {}, meta["run_id"]
-    frames_rel = rel(os.path.join(run_dir, "frames"), REPORT_DIR)
+    rd = report_dir(meta.get("test_id"), p.get("trial"))
+    os.makedirs(rd, exist_ok=True)
+    frames_rel = rel(os.path.join(run_dir, "frames"), rd)
     skip = int(p.get("skip_first") or 0)
     pts = []
     for r in rows:
@@ -371,11 +385,11 @@ def write_interactive_report(run_dir, meta, rows, summ, cond, qs):
     page = INTERACTIVE_TEMPLATE
     for k, v in dict(TITLE=_h.escape(title), RID=rid, MT=mt, ROWS=rows_html, COND=cond_html,
                      STALLED=cond.get("arrivals_not_ok", 0), QREAD=qs["read"], QASKED=qs["asked"],
-                     QCORR=qs["corrected"], QEXCL=qs["excluded"], DATA=rel(run_dir, REPORT_DIR),
+                     QCORR=qs["corrected"], QEXCL=qs["excluded"], DATA=rel(run_dir, rd), ASSETS=rel(dst, rd),
                      PTS=json.dumps(pts, separators=(",", ":")), FR=json.dumps(frames_rel)).items():
         page = page.replace("@@%s@@" % k, str(v))
     page = page.replace("@@JS@@", benchplot)      # last: the JS may contain anything
-    with open(os.path.join(REPORT_DIR, rid + "_interactive.html"), "w", encoding="utf-8") as f:
+    with open(os.path.join(rd, rid + "_interactive.html"), "w", encoding="utf-8") as f:
         f.write(page)
 
 
@@ -386,7 +400,7 @@ INTERACTIVE_TEMPLATE = r"""<!doctype html><html lang="en"><head><meta charset="u
 body{background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,Segoe UI,sans-serif;max-width:1150px;margin:0 auto;padding:20px 16px}
 h1{font-size:1.3rem;margin:.2em 0}h2{font-size:1.05rem;margin-top:1.6em}.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:10px 0;overflow-x:auto}
 table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left;font-size:.9rem}.mut{color:var(--mut)}</style>
-<script src="assets/plotly.min.js"></script></head><body>
+<script src="@@ASSETS@@"></script></head><body>
 <h1>@@TITLE@@</h1><div class="mut">Interactive report. Hover a point to see the picture the camera took for that cycle. Drag to zoom, double-click to reset.
  <a href="@@RID@@.md">Text report</a></div>
 <div class="card"><table>@@MT@@</table></div>
@@ -434,7 +448,7 @@ def write_indexes():
         if m:
             metas.append((d, m))
     metas.sort(key=lambda x: x[1].get("started") or "", reverse=True)
-    cols = ["run_id", "test_id", "firmware", "mode", "status", "cycles_done", "dir", "n", "sd_mm", "range_mm",
+    cols = ["run_id", "test_id_raw", "trial", "test_id", "firmware", "mode", "status", "cycles_done", "dir", "n", "sd_mm", "range_mm",
             "sd_arcsec", "lost_motion_mm", "temp_max_c", "current_hold_mean_ma", "note"]
     table = []
     for d, m in metas:
@@ -442,7 +456,8 @@ def write_indexes():
         c = m.get("conditions") or {}
         for dr, g in (s.get("groups") or {"": {"gauge_mm": {}}}).items():
             gm = g.get("gauge_mm") or {}
-            table.append(dict(run_id=m["run_id"], test_id=m.get("test_id") + (" trial" if p.get("trial") else ""),
+            table.append(dict(run_id=m["run_id"], test_id_raw=m.get("test_id"), trial=bool(p.get("trial")),
+                              test_id=m.get("test_id") + (" trial" if p.get("trial") else ""),
                               firmware=(m.get("servo") or {}).get("firmware_label"), mode=p.get("mode"),
                               status=m.get("status"), cycles_done=m.get("cycles_done"), dir=dr, n=gm.get("n"),
                               sd_mm=gm.get("sd"), range_mm=gm.get("range"),
@@ -459,16 +474,137 @@ def write_indexes():
     os.makedirs(REPORT_DIR, exist_ok=True)
     L = ["# Test reports · STS3215 firmware comparison", "",
          "Generated by `software/sts3215-repeat-bench` after every run (do not edit by hand). "
+         "**Start with [00_library.html](00_library.html)** (all reports, searchable). Folders: `hold-pid/` = hold & PID tests, "
+         "`repeatability/` = up/down move runs (`trials/` = 3-cycle checks, `static-reports/` = hand-made merged/daily pages). "
          "Test definitions: [../TEST-PLAN.md](../TEST-PLAN.md). Data: `data/<test>/<run>/`, index `data/runs-index.csv`.",
          "", "| Report | Interactive | Test | Firmware | Mode | Dir | n | SD mm | range mm | SD arcsec | (+)−(−) mm | max °C | status |",
          "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in table:
-        L.append("| [%s](%s.md) | [plot](%s_interactive.html) | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
-            r["run_id"][:17], r["run_id"], r["run_id"], r["test_id"], r["firmware"], r["mode"], r["dir"], r["n"] or 0,
+        rdr = rel(report_dir(r["test_id_raw"], r["trial"]), REPORT_DIR)
+        L.append("| [%s](%s/%s.md) | [plot](%s/%s_interactive.html) | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
+            r["run_id"][:17], rdr, r["run_id"], rdr, r["run_id"], r["test_id"], r["firmware"], r["mode"], r["dir"], r["n"] or 0,
             _f(r["sd_mm"], 4), _f(r["range_mm"]), _f(r["sd_arcsec"], 1), _f(r["lost_motion_mm"]),
             _f(r["temp_max_c"], 0), r["status"]))
     with open(os.path.join(REPORT_DIR, "README.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(L) + "\n")
+    write_library(metas)
+
+
+# ------------------------------------------------------------------ library (one page that lists every report)
+LIBRARY_FILE = "00_library.html"
+
+
+def _pid_text(m):
+    pid = m.get("pid") or {}
+    if pid.get("P") is not None:
+        return "P %s · D %s · I %s" % (pid.get("P"), pid.get("D"), pid.get("I"))
+    if pid.get("kp_q8") is not None:
+        return "kp %s · kd %s · ki %s" % (pid.get("kp_q8"), pid.get("kd_q8"), pid.get("ki_q8"))
+    return ""
+
+
+def _library_row(m, esc):
+    p, sv, s, c = m.get("params") or {}, m.get("servo") or {}, m.get("summary") or {}, m.get("conditions") or {}
+    rid, tid = m["run_id"], m.get("test_id")
+    sub = rel(report_dir(tid, p.get("trial")), REPORT_DIR)
+    when = (m.get("started") or "")[:16].replace("T", " ")
+    has_plot = os.path.exists(os.path.join(report_dir(tid, p.get("trial")), rid + "_interactive.html"))
+    links = ('%s<a href="%s/%s.md">report</a> · <a href="%s/">data</a>' % (
+        ('<a href="%s/%s_interactive.html">interactive</a> · ' % (sub, rid)) if has_plot else "", sub, rid,
+        esc(rel(os.path.join(DATA_ROOT, tid, rid), REPORT_DIR))))
+    fw = "%s · %s" % (sv.get("firmware_label", "?"), "RoboNine controller" if p.get("mode") == "extension" else "standard")
+    if tid == "T5-hold":
+        h, sm = s.get("hold") or {}, s.get("steps_mean") or {}
+        setup = "hold %s%s" % (p.get("target"), (" · step ±%s every %ss" % (p.get("step"), p.get("step_hold_s"))) if p.get("step") else "")
+        res = "error sd %s · pk-pk %s counts" % (_f(h.get("err_sd"), 2), _f(h.get("err_pk_pk"), 1))
+        if sm:
+            res += " · overshoot %s %% · settle %s s" % (_f(sm.get("overshoot_pct"), 1), _f(sm.get("settle_s"), 2))
+        cells = [when, esc(fw), esc(_pid_text(m)), esc(setup), esc(res), esc(m.get("status") or "")]
+    else:
+        g = next(iter((s.get("groups") or {}).values()), {}).get("gauge_mm") or {}
+        direction = "up/down alternating" if p.get("pattern") == "bidirectional" else (
+            "from %s" % ("below" if p.get("direction") == "+" else "above"))
+        setup = "%s · target %s" % (direction, p.get("target"))
+        res = "n %s · SD %s mm · range %s mm · stalls %s" % (g.get("n", 0), _f(g.get("sd"), 4), _f(g.get("range"), 2),
+                                                           c.get("arrivals_not_ok", 0))
+        cells = [when, esc(fw), esc("%s of %s cycles" % (m.get("cycles_done"), p.get("cycles"))), esc(setup), esc(res),
+                 esc(m.get("status") or "")]
+    text = esc((" ".join(cells) + " " + rid).lower())
+    return '<tr data-t="%s"><td>%s</td></tr>' % (text, "</td><td>".join(cells + [links]))
+
+
+def write_library(metas):
+    """docs/test_reports/00_library.html: every report in one searchable page, grouped by kind."""
+    import html as _h
+    esc = lambda x: _h.escape(str(x), quote=True)
+    metas = sorted((m for _, m in metas), key=lambda m: m.get("started") or "", reverse=True)
+    hold = [m for m in metas if m.get("test_id") == "T5-hold"]
+    rep = [m for m in metas if m.get("test_id") != "T5-hold" and not (m.get("params") or {}).get("trial")]
+    trials = [m for m in metas if m.get("test_id") != "T5-hold" and (m.get("params") or {}).get("trial")]
+
+    def table(ms, head):
+        rows = "".join(_library_row(m, esc) for m in ms) or '<tr><td colspan="9" class="mut">none yet</td></tr>'
+        return '<table class="lib"><tr>%s</tr>%s</table>' % ("".join("<th>%s</th>" % h for h in head), rows)
+    hold_head = ["When", "Firmware · control", "PID", "Setup", "Result", "Status", "Open"]
+    rep_head = ["When", "Firmware · control", "Cycles", "Setup", "Result", "Status", "Open"]
+    static_dir = os.path.join(REPORT_DIR, "repeatability", "static-reports")
+    static = ""
+    if os.path.isdir(static_dir):
+        files = sorted(f for f in os.listdir(static_dir) if f.endswith(".html")
+                       and "daily-report" in f)
+        static = "".join('<li><a href="repeatability/static-reports/%s">%s</a></li>' % (esc(f), esc(f[:-5])) for f in files)
+    page = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>STS3215 test library</title>
+<style>:root{--bg:#fff;--fg:#1d2330;--mut:#5b6475;--card:#f4f6fa;--bd:#d9dee8;--ac:#2f5d9b}
+@media(prefers-color-scheme:dark){:root{--bg:#14171d;--fg:#e6e9ef;--mut:#9aa3b5;--card:#1d222b;--bd:#323946;--ac:#7fa8e0}}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,Segoe UI,sans-serif;max-width:1300px;margin:0 auto;padding:22px 16px}
+h1{font-size:1.4rem;margin:.1em 0}h2{font-size:1.1rem;margin:1.8em 0 .3em}a{color:var(--ac)}.mut{color:var(--mut)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:10px 14px;margin:10px 0;overflow-x:auto}
+table{border-collapse:collapse;width:100%%}td,th{border-bottom:1px solid var(--bd);padding:5px 8px;text-align:left;font-size:.86rem;vertical-align:top}
+th{color:var(--mut);font-weight:600}input{width:100%%;max-width:420px;padding:7px 10px;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--fg);font:inherit}
+summary{cursor:pointer;margin:1em 0 .3em;font-weight:600}</style></head><body>
+<h1>STS3215 test library</h1>
+<p class="mut">Every recorded test in one place, newest first. <b>Open</b> the <i>interactive</i> report for zoomable plots (repeatability
+reports show the camera picture when you hover a point). Files: <code>repeatability/</code> = up/down moves,
+<code>hold-pid/</code> = hold &amp; PID tests, raw data in <code>../../data/</code>. Generated by the bench after every run.</p>
+<input id="q" placeholder="Filter: firmware, date, status, step, PID..." oninput="f()">
+<h2>Hold &amp; PID tests <span class="mut">(%(nh)d)</span></h2><div class="card">%(hold)s</div>
+<h2>Up/down repeatability runs <span class="mut">(%(nr)d)</span></h2><div class="card">%(rep)s</div>
+<details><summary>Repeatability trial runs (3 cycles, %(nt)d)</summary><div class="card">%(trials)s</div></details>
+<h2>Merged / daily reports</h2><ul>%(static)s</ul>
+<script>function f(){const q=document.getElementById('q').value.toLowerCase();
+document.querySelectorAll('table.lib tr[data-t]').forEach(r=>r.style.display=r.dataset.t.includes(q)?'':'none');
+if(q)document.querySelectorAll('details').forEach(d=>d.open=true);}</script></body></html>
+""" % dict(nh=len(hold), nr=len(rep), nt=len(trials), hold=table(hold, hold_head), rep=table(rep, rep_head),
+           trials=table(trials, rep_head), static=static or '<li class="mut">none</li>')
+    os.makedirs(REPORT_DIR, exist_ok=True)
+    with open(os.path.join(REPORT_DIR, LIBRARY_FILE), "w", encoding="utf-8") as f:
+        f.write(page)
+
+
+def write_all_reports():
+    """Rebuild the md + interactive report of every published run into the sorted folders (used after v1.8 moved them),
+    then the README index and the library page."""
+    import hold
+    n = 0
+    for d in all_run_dirs():
+        if d.startswith(STAGING):
+            continue
+        meta, rows, telem = load_run(d)
+        if not meta:
+            continue
+        summ, cond = meta.get("summary") or {}, meta.get("conditions") or {}
+        qs = meta.get("qwen") or dict(read=0, asked=0, corrected=0, excluded=0)
+        if meta.get("test_id") == "T5-hold":
+            if telem:
+                hold.write_reports(d, meta, telem, summ)
+        else:
+            write_report(d, meta, rows, summ, cond, qs)
+            if rows:
+                write_interactive_report(d, meta, rows, summ, cond, qs)
+        n += 1
+    write_indexes()
+    return n
 
 
 # ------------------------------------------------------------------ finalize / publish
@@ -486,7 +622,7 @@ def finalize(run_dir, write_index=True):
     in_staging = os.path.normcase(run_dir).startswith(os.path.normcase(STAGING))
     if not in_staging:
         meta["data_dir"] = rel(run_dir, PROJECT)
-        meta["report"] = rel(os.path.join(REPORT_DIR, meta["run_id"] + ".md"), PROJECT)
+        meta["report"] = rel(os.path.join(report_dir(meta.get("test_id"), p.get("trial")), meta["run_id"] + ".md"), PROJECT)
         write_report(run_dir, meta, rows, summ, cond, qs)
         write_interactive_report(run_dir, meta, rows, summ, cond, qs)
     write_json(os.path.join(run_dir, "meta.json"), meta)

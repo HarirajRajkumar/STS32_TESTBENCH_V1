@@ -8,7 +8,7 @@ Works on both control modes:
 
 One thread owns the bus while a hold runs (like a test run), so every motion endpoint is blocked meanwhile.
 Files: staging (local disk) while running, then data/T5-hold/<run_id>/ (telemetry.csv, meta.json, summary.json) and
-docs/test_reports/<run_id>.md + <run_id>_interactive.html (plotly: position/goal, error, current/load vs time).
+docs/test_reports/hold-pid/<run_id>.md + <run_id>_interactive.html (plotly: position/goal, error, current/load).
 """
 import csv
 import datetime as dt
@@ -334,7 +334,8 @@ class HoldTest:
                            if k in r} for r in new[::stride]],
                     goal=self.goal, base=self.base, pid=self.pid, events=len(self.events),
                     data_dir=storage.rel(self.final_dir, storage.PROJECT) if self.final_dir else None,
-                    report=("docs/test_reports/%s_interactive.html" % self.run_id) if self.final_dir else None)
+                    report=storage.rel(os.path.join(storage.report_dir(TEST_ID), self.run_id + "_interactive.html"),
+                                       storage.PROJECT) if self.final_dir else None)
 
 
 # ------------------------------------------------------------------ reports
@@ -344,6 +345,8 @@ def _f(v, d=2):
 
 def write_reports(run_dir, meta, rows, summ):
     """docs/test_reports/<run>.md and <run>_interactive.html (plotly)."""
+    rd = storage.report_dir(TEST_ID)
+    os.makedirs(rd, exist_ok=True)
     os.makedirs(os.path.join(storage.REPORT_DIR, "assets"), exist_ok=True)
     vend = os.path.join(storage.HERE, "static", "vendor", "plotly.min.js")
     dst = os.path.join(storage.REPORT_DIR, "assets", "plotly.min.js")
@@ -382,9 +385,9 @@ def write_reports(run_dir, meta, rows, summ):
                   sm.get("n"), sm.get("rise_10_90_s"), sm.get("overshoot_pct"), sm.get("settle_s"),
                   sm.get("steady_err_counts"), sm.get("settled")), ""]
     L += ["## Data", "", "* [telemetry.csv](%s/telemetry.csv) · [meta.json](%s/meta.json) · [summary.json](%s/summary.json)"
-          % ((storage.rel(run_dir, storage.REPORT_DIR),) * 3),
+          % ((storage.rel(run_dir, rd),) * 3),
           "* Interactive: [%s_interactive.html](%s_interactive.html)" % (rid, rid), ""]
-    with open(os.path.join(storage.REPORT_DIR, rid + ".md"), "w", encoding="utf-8") as f:
+    with open(os.path.join(rd, rid + ".md"), "w", encoding="utf-8") as f:
         f.write("\n".join(L))
     # ---- html (downsample to <= 6000 points per trace for the browser; the CSV has everything)
     stride = max(1, len(rows) // 6000)
@@ -409,10 +412,10 @@ def write_reports(run_dir, meta, rows, summ):
                      STEPMEAN=html.escape("rise time (10→90 %%) %s s · overshoot %s %% · settling %s s · steady error %s counts · %s of %s settled" % (
                          sm.get("rise_10_90_s"), sm.get("overshoot_pct"), sm.get("settle_s"), sm.get("steady_err_counts"),
                          sm.get("settled"), sm.get("n"))) if sm else "no steps (pure hold)",
-                     STEPS=step_rows, DIR=storage.rel(run_dir, storage.REPORT_DIR)).items():
+                     STEPS=step_rows, DIR=storage.rel(run_dir, rd), ASSETS=storage.rel(dst, rd)).items():
         page = page.replace("@@%s@@" % k, str(v))
     page = page.replace("@@JS@@", js)
-    with open(os.path.join(storage.REPORT_DIR, rid + "_interactive.html"), "w", encoding="utf-8") as f:
+    with open(os.path.join(rd, rid + "_interactive.html"), "w", encoding="utf-8") as f:
         f.write(page)
 
 
@@ -423,7 +426,7 @@ HTML_TEMPLATE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8"><
 body{background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,Segoe UI,sans-serif;max-width:1150px;margin:0 auto;padding:20px 16px}
 h1{font-size:1.3rem;margin:.2em 0}h2{font-size:1.05rem;margin-top:1.6em}.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:10px 0;overflow-x:auto}
 table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left;font-size:.9rem}.mut{color:var(--mut)}</style>
-<script src="assets/plotly.min.js"></script></head><body>
+<script src="@@ASSETS@@"></script></head><body>
 <h1>@@TITLE@@</h1><div class="mut">Hold &amp; PID test. Drag to zoom, double-click to reset. <a href="@@RID@@.md">Text report</a></div>
 <div class="card"><table><tr><th>Run</th><td><code>@@RID@@</code></td></tr><tr><th>When</th><td>@@WHEN@@</td></tr><tr><th>Status</th><td>@@STATUS@@</td></tr>
 <tr><th>Setup</th><td>@@SETUP@@</td></tr><tr><th>PID settings (@@PIDKIND@@)</th><td>@@PID@@</td></tr></table></div>

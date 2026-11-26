@@ -1,6 +1,14 @@
 # Bench versions and notes for the next upgrade
 
-## v1.7.0 (current, 2026-11-26)
+## v1.8.0 (current, 2026-11-26)
+
+* Reports are sorted by kind: `docs/test_reports/hold-pid/` (T5-hold), `repeatability/` (T4.1a / T4.2b up/down runs),
+  `repeatability/trials/`, `repeatability/static-reports/` (hand-made merged/daily pages). `storage.report_dir()` decides.
+* `docs/test_reports/00_library.html` lists every report (searchable, trials folded away) and is rewritten after every
+  run. `storage.write_all_reports()` rebuilds all reports into the sorted folders (used once for the 49 earlier runs).
+* Raw data stays in `data/<test_id>/<run>/` (T4.1a, T5-hold): the library links to each run's data folder.
+
+## v1.7.0 (2026-11-26)
 
 * New **Hold & PID** tab and `hold.py`: torque-on hold with optional ± steps, live position / error plots, step-response
   metrics, report `T5-hold` in `data/` and `docs/test_reports/` (interactive). Legacy P / D / I registers are read and

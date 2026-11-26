@@ -219,7 +219,7 @@ def run_case(robonine, mode, pattern):
     check("%s: files written" % tag, all(os.path.exists(os.path.join(r.dir, f)) for f in
                                          ("samples.csv", "telemetry.csv", "meta.json", "summary.json", "run.xlsx")))
     check("%s: frames saved" % tag, len(os.listdir(os.path.join(r.dir, "frames"))) == exp)
-    check("%s: report in docs/test_reports" % tag, os.path.exists(os.path.join(storage.REPORT_DIR, r.run_id + ".md")))
+    check("%s: report in docs/test_reports" % tag, os.path.exists(os.path.join(storage.report_dir(r.test_id, r.p.get("trial")), r.run_id + ".md")))
     from openpyxl import load_workbook
     wb = load_workbook(os.path.join(r.dir, "run.xlsx"), read_only=True)
     tel = list(wb["Telemetry"].iter_rows(values_only=True))
@@ -298,7 +298,7 @@ def main():
     r.start()
     r.thread.join(30)
     check("trial run: 3 samples, '_trial' run id, report says trial", r.view()["n_rows"] == 3 and r.run_id.endswith("_trial")
-          and "Trial | yes" in open(os.path.join(storage.REPORT_DIR, r.run_id + ".md"), encoding="utf-8").read())
+          and "Trial | yes" in open(os.path.join(storage.report_dir(r.test_id, r.p.get("trial")), r.run_id + ".md"), encoding="utf-8").read())
     check("runs index lists every run", len(storage.read_csv(os.path.join(storage.DATA_ROOT, "runs-index.csv"))) == 1 + 2 + 1 + 2 + 1)
     check("docs/test_reports/README.md written", os.path.exists(os.path.join(storage.REPORT_DIR, "README.md")))
     os.makedirs(os.path.join(storage.STAGING, "crashed"), exist_ok=True)
