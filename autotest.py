@@ -11,7 +11,8 @@ Starting point: the home position (centre = 2048, set in step 3) and the saved s
      minus mean error from above (what the servo itself believes).
   C. Hold jitter: hold home for 10 s and log the error (sd, peak to peak).
 
-The encoder measures the output shaft: play inside the gearbox cannot be seen with it (that needs the gauge, see T3).
+The encoder cannot see play after it (RoboNine's article says it is integrated before the gearing stage, i.e. on the motor side; either way
+play inside the gearbox is invisible to it, that needs the gauge, see T3).
 What this test shows is the controller: dead zone, hysteresis, steady-state error and jitter, per firmware and mode.
 Files: data/T3.1/<run_id>/ and docs/test_reports/auto-test/<run_id>.md + _interactive.html.
 """

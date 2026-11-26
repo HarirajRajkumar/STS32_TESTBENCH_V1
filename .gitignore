@@ -8,3 +8,6 @@ __pycache__/
 *.pyc
 *.log
 .venv/
+
+# third-party reference PDF (not ours to redistribute)
+docs/robonine_docs/
