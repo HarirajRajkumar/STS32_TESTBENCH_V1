@@ -1,6 +1,18 @@
 # Bench versions and notes for the next upgrade
 
-## v1.8.0 (current, 2026-11-26)
+## v1.9.0 (current, 2026-11-26)
+
+* New **Backlash T3** tab and `backlash.py`: guided push test (rest / PLUS / MINUS per position and repeat), encoder + gauge
+  picture + Qwen reading (or typed) per record, redo, direction check, result in mm and degrees vs the 0.5° datasheet and the
+  0.87° of the other report. Data `data/T3/`, reports `docs/test_reports/backlash/`, third section in the library.
+* `docs/TEST-PLAN.md` updated: T3 is ready, T3.1 / T4.2b / Hold & PID roles, lever configurations (50 mm short lever, 20 × 20 beam),
+  load torque conversions. No new test id was invented: T3, T3.1, T4.2b, T5 and T6.1 already covered the question.
+* Tested with a simulated servo + camera + reader (free play recovered as 0.76 mm = 0.87° at 50 mm, redo path, report and library)
+  and the tab in headless Chrome. **Not yet run on the real servo.**
+* Next: T3.1 deadband step sweep as a bench mode (automatic reversing steps 1..15 counts, encoder + gauge); optional second dial
+  gauge / force input for the load; apply the same load at several lever radii.
+
+## v1.8.0 (2026-11-26)
 
 * Reports are sorted by kind: `docs/test_reports/hold-pid/` (T5-hold), `repeatability/` (T4.1a / T4.2b up/down runs),
   `repeatability/trials/`, `repeatability/static-reports/` (hand-made merged/daily pages). `storage.report_dir()` decides.

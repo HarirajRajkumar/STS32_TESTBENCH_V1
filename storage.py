@@ -27,11 +27,14 @@ REPORT_DIR = os.path.join(PROJECT, "docs", "test_reports")
 def report_dir(test_id, trial=False):
     """Reports are sorted by kind so nothing is mixed:
         hold-pid/                 Hold & PID tests (T5-hold)
+        backlash/                 T3 backlash (free play) push tests
         repeatability/            up/down repeatability runs (T4.1a, T4.2b)
         repeatability/trials/     their 3-cycle trial runs
     00_library.html in REPORT_DIR lists all of them; assets/plotly.min.js is shared."""
     if test_id == "T5-hold":
         return os.path.join(REPORT_DIR, "hold-pid")
+    if test_id == "T3":
+        return os.path.join(REPORT_DIR, "backlash")
     return os.path.join(REPORT_DIR, "repeatability", "trials") if trial else os.path.join(REPORT_DIR, "repeatability")
 STAGING = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.join(HERE, "_local"), "sts-bench", "staging")
 OLD_RUNS = os.path.join(HERE, "data", "runs")                         # layout before 2026-11-25 (migrated)
@@ -111,7 +114,8 @@ def write_samples(run_dir, rows):
     os.replace(tmp, os.path.join(run_dir, "samples.csv"))
 
 
-_NUM = {"err": float, "cycle": int, "target": float, "approach_from": float, "pos": float, "err_counts": float, "current_ma": float,
+_NUM = {"err": float, "step": int, "pos_idx": int, "repeat": int, "enc_mean": float, "enc_sd": float, "enc_n": int,
+        "cycle": int, "target": float, "approach_from": float, "pos": float, "err_counts": float, "current_ma": float,
         "load": float, "temp": float, "voltage": float, "arrive_ms": float, "qwen_value": float, "qwen_ms": float,
         "manual_value": float, "value_mm": float, "t_s": float, "goal": float, "speed": float, "current_raw": float,
         "moving": float}
@@ -513,7 +517,16 @@ def _library_row(m, esc):
         ('<a href="%s/%s_interactive.html">interactive</a> · ' % (sub, rid)) if has_plot else "", sub, rid,
         esc(rel(os.path.join(DATA_ROOT, tid, rid), REPORT_DIR))))
     fw = "%s · %s" % (sv.get("firmware_label", "?"), "RoboNine controller" if p.get("mode") == "extension" else "standard")
-    if tid == "T5-hold":
+    if tid == "T3":
+        a = s.get("all") or {}
+        fd, fm = a.get("free_play_deg") or {}, a.get("free_play_mm") or {}
+        v = s.get("verdict") or {}
+        setup = "lever %s mm · %s positions x %s repeats · %s" % (p.get("lever_r_mm"), len(p.get("positions") or []),
+                                                                p.get("repeats"), p.get("load_note") or "load not described")
+        res = "free play %s mm = %s deg%s" % (_f(fm.get("mean"), 3), _f(fd.get("mean"), 3),
+                                              (" (%s datasheet 0.5 deg)" % ("within" if v.get("within_datasheet") else "above")) if v else "")
+        cells = [when, esc(fw), esc(_pid_text(m)), esc(setup), esc(res), esc(m.get("status") or "")]
+    elif tid == "T5-hold":
         h, sm = s.get("hold") or {}, s.get("steps_mean") or {}
         setup = "hold %s%s" % (p.get("target"), (" · step ±%s every %ss" % (p.get("step"), p.get("step_hold_s"))) if p.get("step") else "")
         res = "error sd %s · pk-pk %s counts" % (_f(h.get("err_sd"), 2), _f(h.get("err_pk_pk"), 1))
@@ -539,8 +552,10 @@ def write_library(metas):
     esc = lambda x: _h.escape(str(x), quote=True)
     metas = sorted((m for _, m in metas), key=lambda m: m.get("started") or "", reverse=True)
     hold = [m for m in metas if m.get("test_id") == "T5-hold"]
-    rep = [m for m in metas if m.get("test_id") != "T5-hold" and not (m.get("params") or {}).get("trial")]
-    trials = [m for m in metas if m.get("test_id") != "T5-hold" and (m.get("params") or {}).get("trial")]
+    bl = [m for m in metas if m.get("test_id") == "T3"]
+    other = lambda m: m.get("test_id") not in ("T5-hold", "T3")
+    rep = [m for m in metas if other(m) and not (m.get("params") or {}).get("trial")]
+    trials = [m for m in metas if other(m) and (m.get("params") or {}).get("trial")]
 
     def table(ms, head):
         rows = "".join(_library_row(m, esc) for m in ms) or '<tr><td colspan="9" class="mut">none yet</td></tr>'
@@ -553,6 +568,7 @@ def write_library(metas):
         files = sorted(f for f in os.listdir(static_dir) if f.endswith(".html")
                        and "daily-report" in f)
         static = "".join('<li><a href="repeatability/static-reports/%s">%s</a></li>' % (esc(f), esc(f[:-5])) for f in files)
+    pid_head = ["When", "Firmware · control", "PID", "Setup", "Result", "Status", "Open"]
     page = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>STS3215 test library</title>
 <style>:root{--bg:#fff;--fg:#1d2330;--mut:#5b6475;--card:#f4f6fa;--bd:#d9dee8;--ac:#2f5d9b}
@@ -569,13 +585,14 @@ reports show the camera picture when you hover a point). Files: <code>repeatabil
 <code>hold-pid/</code> = hold &amp; PID tests, raw data in <code>../../data/</code>. Generated by the bench after every run.</p>
 <input id="q" placeholder="Filter: firmware, date, status, step, PID..." oninput="f()">
 <h2>Hold &amp; PID tests <span class="mut">(%(nh)d)</span></h2><div class="card">%(hold)s</div>
+<h2>Backlash push tests (T3) <span class="mut">(%(nb)d)</span></h2><div class="card">%(bl)s</div>
 <h2>Up/down repeatability runs <span class="mut">(%(nr)d)</span></h2><div class="card">%(rep)s</div>
 <details><summary>Repeatability trial runs (3 cycles, %(nt)d)</summary><div class="card">%(trials)s</div></details>
 <h2>Merged / daily reports</h2><ul>%(static)s</ul>
 <script>function f(){const q=document.getElementById('q').value.toLowerCase();
 document.querySelectorAll('table.lib tr[data-t]').forEach(r=>r.style.display=r.dataset.t.includes(q)?'':'none');
 if(q)document.querySelectorAll('details').forEach(d=>d.open=true);}</script></body></html>
-""" % dict(nh=len(hold), nr=len(rep), nt=len(trials), hold=table(hold, hold_head), rep=table(rep, rep_head),
+""" % dict(nh=len(hold), nr=len(rep), nt=len(trials), nb=len(bl), bl=table(bl, pid_head), hold=table(hold, hold_head), rep=table(rep, rep_head),
            trials=table(trials, rep_head), static=static or '<li class="mut">none</li>')
     os.makedirs(REPORT_DIR, exist_ok=True)
     with open(os.path.join(REPORT_DIR, LIBRARY_FILE), "w", encoding="utf-8") as f:
@@ -595,7 +612,12 @@ def write_all_reports():
             continue
         summ, cond = meta.get("summary") or {}, meta.get("conditions") or {}
         qs = meta.get("qwen") or dict(read=0, asked=0, corrected=0, excluded=0)
-        if meta.get("test_id") == "T5-hold":
+        if meta.get("test_id") == "T3":
+            import backlash
+            for r in rows:
+                r["value_mm"] = r.get("value_mm") if r.get("value_mm") is not None else stats.final_value(r)
+            backlash.write_reports(d, meta, rows, summ)
+        elif meta.get("test_id") == "T5-hold":
             if telem:
                 hold.write_reports(d, meta, telem, summ)
         else:

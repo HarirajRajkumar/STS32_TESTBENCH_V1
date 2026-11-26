@@ -32,6 +32,14 @@ torque off at once and stops the run.
 In step 5, **Standard** control is the legacy STS position registers (the same commands on both firmwares), and
 **RoboNine controller** is the v9 extension mode.
 
+**Backlash T3 (v1.9.0).** The **Backlash T3** tab is a guided free-play (push) test, the same method as another user's
+report (1.3 mm at 86 mm = 0.87°, datasheet 0.5°). The servo holds with torque on; you load the lever with the same small torque
+each way and press **Record** at *rest → PLUS → MINUS* (PLUS = toward higher encoder counts). Per record the bench stores the encoder
+(mean of 0.6 s), current, a gauge picture and the Qwen reading (or a value you type). Free play = |gauge PLUS − gauge MINUS|, angle =
+free play ÷ lever radius (enter the distance from the motor axis to where the gauge touches), plus the angle the encoder saw.
+Results per position and overall, saved to `data/T3/<run>/` and `docs/test_reports/backlash/<run>_interactive.html` (hover = picture).
+Details and loads: `docs/TEST-PLAN.md`, section *T3 in detail*.
+
 **Hold & PID (v1.7.0).** The **Hold & PID** tab keeps the torque on at one position and logs how the position loop holds it
 (about 100 samples/s: position, goal, error, current, load, temperature). Push the lever by hand to see how it fights
 back, or set *Step ± counts* and the bench steps the goal around the target and measures rise time (10→90 %),

@@ -12,6 +12,7 @@ import time
 from flask import Flask, Response, jsonify, request, send_from_directory
 from serial.tools import list_ports
 
+import backlash
 import camera as camlib
 import hold
 import stats
@@ -20,7 +21,8 @@ from runner import Run
 from sts import DEFAULT_EXT_CONFIG, MIN_SUPPLY_V, R_LOCK, Bus, BusError
 from vision import QwenReader, api_key, apply_decimals, fixed_decimals
 
-APP_VERSION = "1.8.0"     # 1.8.0: reports sorted into hold-pid/ and repeatability/, library page 00_library.html
+APP_VERSION = "1.9.0"     # 1.9.0: T3 backlash push test tab (backlash.py)
+                          # 1.8.0: reports sorted into hold-pid/ and repeatability/, library page 00_library.html
                           # 1.7.1: temperature limit needs a confirmed reading (bad single reads no longer stop a hold or run)
                           # 1.7.0: Hold & PID test tab (hold.py)
                           # 1.6.0: interactive plotly charts (hover = camera picture) live, per run, comparison + <run>_interactive.html reports
@@ -65,6 +67,7 @@ class AppState:
         self.runner_owns_bus = False
         self.run = None
         self.hold = None                          # Hold & PID test (hold.py)
+        self.backlash = None                      # T3 backlash push test (backlash.py)
         self.sweep = None                         # limit sweep: {"min","max","n"} while the lever is moved by hand
         self.calib = self.settings.get("calib") or {}
         self.camera = camlib.Camera()
@@ -99,7 +102,7 @@ class AppState:
     def running(self):
         """True while a test run OR a firmware flash owns the port (every motion endpoint checks this)."""
         return ((self.run is not None and self.run.thread.is_alive()) or self.flashing() or
-                (self.hold is not None and self.hold.alive()))
+                (self.hold is not None and self.hold.alive()) or (self.backlash is not None and self.backlash.alive()))
 
     def flashing(self):
         return bool(self.fw_job and self.fw_job["state"] == "running")
@@ -166,7 +169,8 @@ def state():
               settings=s, camera_open=S.camera.cap is not None, camera_error=S.camera.error,
               vision=S.reader.describe(), vision_key=bool(api_key()),
               run=S.run.view(since) if S.run else None, running=S.running(),
-              hold=S.hold.view(int(request.args.get("hsince", 0))) if S.hold else None)
+              hold=S.hold.view(int(request.args.get("hsince", 0))) if S.hold else None,
+              backlash=S.backlash.view() if S.backlash else None)
 
 
 @app.route("/api/ports")
@@ -419,6 +423,9 @@ def estop():
     if S.hold and S.hold.alive():
         S.hold.estopped = True
         S.hold.stop_ev.set()
+    if S.backlash and S.backlash.alive():
+        S.backlash.estopped = True
+        S.backlash.stop_ev.set()
     errs = []
     for _ in range(3):
         try:
@@ -729,9 +736,83 @@ def hold_goal():
     return ok()
 
 
+# ------------------------------------------------------------------ T3 backlash push test (backlash.py)
+@app.route("/api/bl/start", methods=["POST"])
+def bl_start():
+    if not S.servo_info or S.running():
+        return fail("not connected / a run, hold or backlash test is already active")
+    if (np := no_power()):
+        return np
+    b, run = body(), S.settings["run"]
+    mode = b.get("mode", "legacy")
+    if mode not in ("legacy", "extension"):
+        return fail("mode = legacy | extension")
+    if mode == "extension" and S.servo_info.get("firmware_family") != "robonine":
+        return fail("RoboNine controller needs the RoboNine v9 firmware (servo reports %s)" % S.servo_info["firmware_label"])
+    try:
+        positions = [int(x) for x in b.get("positions") or []]
+        repeats, lever = int(b.get("repeats") or 5), float(b.get("lever_r_mm") or 0)
+        speed, accel = int(b.get("speed") or run["speed"]), int(b.get("accel") or run["accel"])
+    except (TypeError, ValueError):
+        return fail("positions, repeats and lever radius must be numbers")
+    lo, hi = S.settings["soft_min"], S.settings["soft_max"]
+    if not positions or len(positions) > 6:
+        return fail("give 1 to 6 positions")
+    for x in positions:
+        if not lo <= x <= hi:
+            return fail("position %d is outside soft limits %d..%d" % (x, lo, hi))
+    if not 1 <= repeats <= 20:
+        return fail("repeats 1..20")
+    if lever <= 0:
+        return fail("lever radius (axis to gauge contact point, mm) is needed to convert mm to degrees")
+    reader = b.get("reader", "qwen")
+    if reader == "qwen" and S.camera.cap is None:
+        return fail("open the camera first (step 2), or choose typed gauge readings")
+    p = dict(mode=mode, id=S.settings["id"], positions=positions, repeats=repeats, lever_r_mm=lever,
+             with_rest=bool(b.get("with_rest", True)), load_note=(b.get("load_note") or "")[:300], reader=reader,
+             speed=speed, accel=accel, acc_reg=max(1, min(254, round(accel / 100))), avg_s=0.6, settle_s=1.5,
+             max_temp_c=int(run.get("max_temp_c") or 65), gauge_decimals=run.get("gauge_decimals"))
+    S.backlash = backlash.BacklashTest(S, p)
+    S.backlash.start()
+    return ok(run_id=S.backlash.run_id)
+
+
+@app.route("/api/bl/record", methods=["POST"])
+def bl_record():
+    t = S.backlash
+    if not (t and t.alive() and t.state == "waiting"):
+        return fail("not waiting for a record")
+    val = body().get("value")
+    try:
+        val = None if val in (None, "") else float(val)
+    except (TypeError, ValueError):
+        return fail("gauge value must be a number")
+    t.command("record", val)
+    return ok()
+
+
+@app.route("/api/bl/undo", methods=["POST"])
+def bl_undo():
+    t = S.backlash
+    if not (t and t.alive() and t.state == "waiting" and t.k > 0):
+        return fail("nothing to redo")
+    t.command("undo")
+    return ok()
+
+
+@app.route("/api/bl/stop", methods=["POST"])
+def bl_stop():
+    if S.backlash and S.backlash.alive():
+        S.backlash.stop_ev.set()
+    return ok()
+
+
 @app.route("/runs/<rid>/frames/<fn>")
 def frame(rid, fn):
-    d = S.run.dir if (S.run and S.run.run_id == rid) else storage.find_run(rid)
+    if S.backlash and S.backlash.run_id == rid and not S.backlash.final_dir:
+        d = S.backlash.dir                                   # live picture thumbnails while the T3 test runs
+    else:
+        d = S.run.dir if (S.run and S.run.run_id == rid) else storage.find_run(rid)
     if not d:
         return fail("run not found", 404)
     return send_from_directory(os.path.join(d, "frames"), fn)
