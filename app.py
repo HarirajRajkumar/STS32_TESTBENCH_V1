@@ -12,6 +12,7 @@ import time
 from flask import Flask, Response, jsonify, request, send_from_directory
 from serial.tools import list_ports
 
+import autotest
 import backlash
 import camera as camlib
 import hold
@@ -21,7 +22,8 @@ from runner import Run
 from sts import DEFAULT_EXT_CONFIG, MIN_SUPPLY_V, R_LOCK, Bus, BusError
 from vision import QwenReader, api_key, apply_decimals, fixed_decimals
 
-APP_VERSION = "1.9.0"     # 1.9.0: T3 backlash push test tab (backlash.py)
+APP_VERSION = "1.10.0"     # 1.10.0: Auto test tab (T3.1, set vs current, no gauge); T3 gauge tab hidden
+                          # 1.9.0: T3 backlash push test tab (backlash.py)
                           # 1.8.0: reports sorted into hold-pid/ and repeatability/, library page 00_library.html
                           # 1.7.1: temperature limit needs a confirmed reading (bad single reads no longer stop a hold or run)
                           # 1.7.0: Hold & PID test tab (hold.py)
@@ -68,6 +70,7 @@ class AppState:
         self.run = None
         self.hold = None                          # Hold & PID test (hold.py)
         self.backlash = None                      # T3 backlash push test (backlash.py)
+        self.auto = None                          # T3.1 automatic set-vs-current test (autotest.py)
         self.sweep = None                         # limit sweep: {"min","max","n"} while the lever is moved by hand
         self.calib = self.settings.get("calib") or {}
         self.camera = camlib.Camera()
@@ -102,7 +105,8 @@ class AppState:
     def running(self):
         """True while a test run OR a firmware flash owns the port (every motion endpoint checks this)."""
         return ((self.run is not None and self.run.thread.is_alive()) or self.flashing() or
-                (self.hold is not None and self.hold.alive()) or (self.backlash is not None and self.backlash.alive()))
+                (self.hold is not None and self.hold.alive()) or (self.backlash is not None and self.backlash.alive()) or
+                (self.auto is not None and self.auto.alive()))
 
     def flashing(self):
         return bool(self.fw_job and self.fw_job["state"] == "running")
@@ -170,7 +174,8 @@ def state():
               vision=S.reader.describe(), vision_key=bool(api_key()),
               run=S.run.view(since) if S.run else None, running=S.running(),
               hold=S.hold.view(int(request.args.get("hsince", 0))) if S.hold else None,
-              backlash=S.backlash.view() if S.backlash else None)
+              backlash=S.backlash.view() if S.backlash else None,
+              auto=S.auto.view(int(request.args.get("asince", 0))) if S.auto else None)
 
 
 @app.route("/api/ports")
@@ -426,6 +431,9 @@ def estop():
     if S.backlash and S.backlash.alive():
         S.backlash.estopped = True
         S.backlash.stop_ev.set()
+    if S.auto and S.auto.alive():
+        S.auto.estopped = True
+        S.auto.stop_ev.set()
     errs = []
     for _ in range(3):
         try:
@@ -804,6 +812,43 @@ def bl_undo():
 def bl_stop():
     if S.backlash and S.backlash.alive():
         S.backlash.stop_ev.set()
+    return ok()
+
+
+# ------------------------------------------------------------------ T3.1 automatic set-vs-current test (autotest.py)
+@app.route("/api/auto/start", methods=["POST"])
+def auto_start():
+    if not S.servo_info or S.running():
+        return fail("not connected / a run or another test is already active")
+    if (np := no_power()):
+        return np
+    if not S.calib.get("center_ok"):
+        return fail("home the servo first: step 3 Centre -> Set centre = 2048")
+    b, run = body(), S.settings["run"]
+    mode = b.get("mode", "legacy")
+    if mode not in ("legacy", "extension"):
+        return fail("mode = legacy | extension")
+    if mode == "extension" and S.servo_info.get("firmware_family") != "robonine":
+        return fail("RoboNine controller needs the RoboNine v9 firmware (servo reports %s)" % S.servo_info["firmware_label"])
+    home = int(S.calib.get("center_pos") or 2048)
+    lo, hi = S.settings["soft_min"], S.settings["soft_max"]
+    targets = autotest.plan_targets(home, lo, hi)
+    if not targets:
+        return fail("the soft limits %d..%d leave no room around home %d (need %d counts each side): redo step 4 Positions "
+                    "or widen the limits" % (lo, hi, home, autotest.PRE))
+    speed, accel = int(run["speed"]), int(run["accel"])
+    p = dict(mode=mode, id=S.settings["id"], home=home, lo=lo, hi=hi, targets=targets, speed=speed, accel=accel,
+             acc_reg=max(1, min(254, round(accel / 100))), dwell_s=1.0, db_repeats=3, hy_repeats=5, jitter_s=10,
+             max_temp_c=int(run.get("max_temp_c") or 65))
+    S.auto = autotest.AutoTest(S, p)
+    S.auto.thread.start()
+    return ok(run_id=S.auto.run_id, targets=targets)
+
+
+@app.route("/api/auto/stop", methods=["POST"])
+def auto_stop():
+    if S.auto and S.auto.alive():
+        S.auto.stop_ev.set()
     return ok()
 
 

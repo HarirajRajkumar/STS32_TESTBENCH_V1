@@ -32,7 +32,13 @@ torque off at once and stops the run.
 In step 5, **Standard** control is the legacy STS position registers (the same commands on both firmwares), and
 **RoboNine controller** is the v9 extension mode.
 
-**Backlash T3 (v1.9.0).** The **Backlash T3** tab is a guided free-play (push) test, the same method as another user's
+**Auto test (v1.10.0, T3.1).** After homing (step 3 centre = 2048, step 4 positions) open **Auto test**: a checklist shows what is
+missing, then **Run auto test** takes the home position and the limits by itself and, in about 5 minutes and without the camera or
+gauge, measures from the set value and the current (encoder) value: the command dead zone (reversing steps of 1-15 counts), the
+hysteresis when arriving from below / above, and the hold jitter. Report: `docs/test_reports/auto-test/<run>_interactive.html`, data
+`data/T3.1/<run>/`. Run it once per firmware / control mode and compare in the library. Details: `docs/TEST-PLAN.md`, *T3.1 in detail*.
+
+**Backlash T3 (v1.9.0, manual, needs the gauge; its tab is hidden for now).** The **Backlash T3** tab is a guided free-play (push) test, the same method as another user's
 report (1.3 mm at 86 mm = 0.87°, datasheet 0.5°). The servo holds with torque on; you load the lever with the same small torque
 each way and press **Record** at *rest → PLUS → MINUS* (PLUS = toward higher encoder counts). Per record the bench stores the encoder
 (mean of 0.6 s), current, a gauge picture and the Qwen reading (or a value you type). Free play = |gauge PLUS − gauge MINUS|, angle =

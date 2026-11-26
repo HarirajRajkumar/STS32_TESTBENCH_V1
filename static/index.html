@@ -78,8 +78,9 @@ pre{background:var(--soft);border-radius:8px;padding:10px;overflow:auto;font-siz
   <button data-s="3"><i>3</i>Centre</button>
   <button data-s="4"><i>4</i>Positions</button>
   <button data-s="6"><i>5</i>Run test</button>
+  <button data-s="11"><i>▶</i>Auto test</button>
   <button data-s="9"><i>◎</i>Hold &amp; PID</button>
-  <button data-s="10"><i>⇋</i>Backlash T3</button>
+  <button data-s="10" style="display:none"><i>⇋</i>Backlash T3 (gauge)</button>
   <span class="sep"></span>
   <button data-s="7"><i>≡</i>Results</button>
   <button data-s="8"><i>⇄</i>Change firmware</button>
@@ -358,6 +359,37 @@ pre{background:var(--soft);border-radius:8px;padding:10px;overflow:auto;font-siz
         E-STOP cuts torque. Saved to data/T3/ and docs/test_reports/backlash/. The lever radius is the distance from the motor axis to where the gauge touches.</div>
     </div>
 
+    <!-- 11 AUTO TEST (T3.1) -->
+    <div class="step" id="s11">
+      <h2>Auto test (T3.1) · set value vs current value</h2>
+      <p class="say">One click, about 5 minutes. After you <b>home</b> the servo (step 3, centre = 2048) the bench takes the home position and the saved
+        limits and tests the controller by itself. It uses <b>only the set value and the current (encoder) value</b>; the camera and the gauge are not used.
+        Run it once for each firmware / control mode and compare the reports.</p>
+      <h3>Ready?</h3>
+      <div id="aChecks"></div>
+      <h3>Control</h3>
+      <div class="choice">
+        <label><input type="radio" name="amode" value="legacy" checked> Standard (the servo's own loop)</label>
+        <label><input type="radio" name="amode" value="extension"> RoboNine controller</label>
+      </div>
+      <div class="row">
+        <button id="aStart" class="big green">Run auto test</button>
+        <button id="aStop">Stop (keeps holding home)</button>
+      </div>
+      <div id="aMsg" class="msg"></div>
+      <div style="background:var(--soft);border-radius:8px;height:12px;overflow:hidden"><div id="aBar" style="background:var(--acc);height:12px;width:0"></div></div>
+      <div id="aPhase" class="mut" style="margin:6px 0"></div>
+      <div id="aPlot" style="height:260px"></div>
+      <h3>A · Command deadband</h3>
+      <div class="mut">Reversing steps of 1…15 counts after arriving at home: how far does the encoder follow? A dead zone shows as steps that are ignored.</div>
+      <div class="scroll" style="max-height:260px"><table id="aDb"></table></div>
+      <h3>B · Hysteresis at targets</h3>
+      <div class="mut">Error (current − set) after arriving from below and from above. Hysteresis = below − above.</div>
+      <div class="scroll" style="max-height:200px"><table id="aHy"></table></div>
+      <div class="mut" style="margin-top:8px"><b>Phases:</b> A deadband (3 repeats, both sides) → B hysteresis at home and home ± 150 → C hold jitter at home for 10 s.
+        Saved to data/T3.1/ and docs/test_reports/auto-test/ (interactive plots). Stop leaves the lever held at home; E-STOP cuts torque.</div>
+    </div>
+
     <!-- 7 RESULTS -->
     <div class="step" id="s7">
       <h2>Results</h2>
@@ -438,7 +470,7 @@ let ST=null, rowsCache=[], selectedRuns=new Set(), runsList=[];
 // ---------- steps
 function show(n){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('act',b.dataset.s==n));
   document.querySelectorAll('.step').forEach(s=>s.classList.toggle('act',s.id==='s'+n));if(n==7)loadRuns();
-  setTimeout(()=>['hPos','hErr','detChart','cmpChart','chart'].forEach(id=>{const d=$(id);if(d&&d._fullLayout&&d.offsetWidth)Plotly.Plots.resize(d);}),60);}
+  setTimeout(()=>['hPos','hErr','aPlot','detChart','cmpChart','chart'].forEach(id=>{const d=$(id);if(d&&d._fullLayout&&d.offsetWidth)Plotly.Plots.resize(d);}),60);}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>show(b.dataset.s));
 document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>show(b.dataset.go));
 
@@ -706,10 +738,43 @@ function blView(b){
     <td>${r.frame?`<img class="thumb" src="/runs/${b.run_id}/frames/${r.frame}" loading="lazy">`:''}</td></tr>`).join('');
   $('bTbl').querySelectorAll('img.thumb').forEach(im=>im.onclick=()=>{$('zoom').querySelector('img').src=im.src;$('zoom').style.display='flex';});}
 
+// ---------- 11 auto test (T3.1)
+let autoRows=[],autoRun=null,autoN=0;
+function autoChecks(j){
+  const c=j.calib||{},st=j.settings||{},home=c.center_pos||2048,lo=st.soft_min,hi=st.soft_max,ok=t=>lo<=t-60&&t+60<=hi;
+  const targets=[home-150,home,home+150].filter(ok);
+  const rows=[[!!(j.connected&&j.servo),'Servo connected (step 1)',j.connected&&j.servo?`ID ${j.servo.id}, ${j.servo.firmware_label}`:'connect first',1],
+    [!!c.center_ok,'Homed: centre = 2048 set (step 3)',c.center_ok?`home = ${home}`:'press "Set centre = 2048" with the lever straight up',3],
+    [targets.length>0&&ok(home),'Limits leave room around home (step 4)',`limits ${lo}..${hi}`+(targets.length?`, targets ${targets.join(', ')}`:' — need 60 counts each side of home'),4]];
+  const alive=j.auto&&['starting','running'].includes(j.auto.state),ready=rows.every(r=>r[0]);
+  $('aChecks').innerHTML=rows.map(r=>`<div style="margin:3px 0">${r[0]?'<span class="okc">✓</span>':'<span class="err">✗</span>'} <b>${r[1]}</b> <span class="mut">${r[2]}</span>${r[0]?'':` <a href="#" data-go="${r[3]}" style="color:var(--acc)">go to step</a>`}</div>`).join('');
+  $('aChecks').querySelectorAll('[data-go]').forEach(a=>a.onclick=e=>{e.preventDefault();show(a.dataset.go);});
+  $('aStart').disabled=!ready||j.running;$('aStop').disabled=!alive;}
+$('aStart').onclick=async()=>{autoRows=[];autoRun=null;autoN=0;
+  const j=await api('/api/auto/start',{mode:document.querySelector('input[name=amode]:checked').value});
+  $('aMsg').innerHTML=j.ok?good('Started. Targets '+j.targets.join(', ')+'. Do not touch the lever.'):bad(j.error);};
+$('aStop').onclick=async()=>{await api('/api/auto/stop',{});$('aMsg').innerHTML='stopping…';};
+function autoView(a){
+  if(!a)return;
+  if(a.run_id!==autoRun){autoRun=a.run_id;autoRows=[];autoN=0;return;}
+  autoRows=autoRows.concat(a.rows);autoN=a.n;if(autoRows.length>6000)autoRows=autoRows.slice(autoRows.length-6000);
+  const alive=a.state==='starting'||a.state==='running';
+  $('aBar').style.width=Math.round(100*(a.progress||0))+'%';$('aPhase').textContent=alive?a.phase:'';
+  if(alive)$('aMsg').innerHTML=good('Running… '+Math.round(100*(a.progress||0))+' %');
+  else if(a.state!=='starting')$('aMsg').innerHTML=(a.state==='error'?bad(a.message||'error'):good((a.state==='finished'?'Finished. ':'Stopped. ')+(a.message||'')))+(a.report?` Saved: <b>${a.report}</b>`:' Saving…');
+  if(a.deadband)$('aDb').innerHTML='<tr><th>step (counts)</th><th>median response</th><th>min</th><th>max</th><th>response / n</th><th>follows</th></tr>'+a.deadband.table.map(t=>
+    `<tr><td>${t.n}</td><td>${t.median}</td><td>${t.min}</td><td>${t.max}</td><td>${t.fraction}</td><td class="${t.follows?'okc':'err'}">${t.follows?'yes':'ignored'}</td></tr>`).join('')+
+    `<tr><td colspan="6" style="text-align:left"><b>${a.deadband.deadzone_counts?'Dead zone: steps up to '+a.deadband.deadzone_counts+' counts ('+a.deadband.deadzone_deg+'°) are ignored':'No dead zone seen so far'}</b></td></tr>`;
+  if(a.hysteresis)$('aHy').innerHTML='<tr><th>target</th><th>error from below</th><th>error from above</th><th>hysteresis</th><th>n</th></tr>'+a.hysteresis.targets.map(t=>
+    `<tr><td>${t.target}</td><td>${t.err_below}</td><td>${t.err_above}</td><td><b>${t.hysteresis}</b></td><td>${t.n}</td></tr>`).join('');
+  if(!$('s11').classList.contains('act'))return;
+  const mk=(name,color,key,dash)=>({name,color,mode:'lines',dash,pts:autoRows.filter(r=>r[key]!=null).map(r=>({x:r.t_s,y:r[key]}))});
+  BenchPlot.draw($('aPlot'),[mk('set (goal)','#d97706','goal','dot'),mk('current (encoder)','#2563eb','pos')],{dec:1,xtitle:'time (s)',ytitle:'counts',height:260});}
+
 // ---------- poll
 let lastRunId=null;
 function markDone(n,done){document.querySelector(`nav button[data-s="${n}"]`).classList.toggle('done',!!done);}
-async function poll(){const j=await api('/api/state?since='+(rowsCache.length)+'&hsince='+holdN);if(!j.ok)return;ST=j;holdView(j.hold,j.running);blView(j.backlash);const s=j.servo,t=j.telem,c=j.calib||{};
+async function poll(){const j=await api('/api/state?since='+(rowsCache.length)+'&hsince='+holdN+'&asince='+autoN);if(!j.ok)return;ST=j;holdView(j.hold,j.running);blView(j.backlash);autoView(j.auto);autoChecks(j);const s=j.servo,t=j.telem,c=j.calib||{};
   if(!formLoaded){fillForm(j.settings);loadPorts();formLoaded=true;}
   $('appVer').textContent='v'+j.version;fwJobView(j.fw_job);$('fwFlash').disabled=j.running;$('fwDownload').disabled=j.running;
   $('bConn').textContent=j.connected&&s?`servo: ${j.settings.port} · ID ${s.id}`:'servo: not connected';$('bConn').className='chip'+(j.connected&&s?' on':'');

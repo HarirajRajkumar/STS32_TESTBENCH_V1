@@ -1,6 +1,17 @@
 # Bench versions and notes for the next upgrade
 
-## v1.9.0 (current, 2026-11-26)
+## v1.10.0 (current, 2026-11-26)
+
+* New **Auto test** tab and `autotest.py` (T3.1): one click after homing; deadband sweep (1-15 counts, both sides), hysteresis at
+  home and home ± 150, 10 s hold jitter, from set vs current values only (no camera / gauge). Checklist shows what is missing.
+  Data `data/T3.1/`, reports `docs/test_reports/auto-test/`, own section in the library.
+* The T3 gauge tab is hidden (code kept) until the gauge is used again.
+* Tested with a simulated servo that has a 3-count dead zone and stops 1 count short: estimate 4 counts, hysteresis −2 counts.
+  **Not yet run on the real servo.** Expected first real run: Feetech factory, Standard mode.
+* Housekeeping: the 24 runs recorded after v1.7.0 (Hold & PID, empty T3, 3-cycle trials) were deleted at the user's request.
+* Ideas: repeat phase A at several positions and loads; add the load / lever in the beam configuration to the metadata.
+
+## v1.9.0 (2026-11-26)
 
 * New **Backlash T3** tab and `backlash.py`: guided push test (rest / PLUS / MINUS per position and repeat), encoder + gauge
   picture + Qwen reading (or typed) per record, redo, direction check, result in mm and degrees vs the 0.5° datasheet and the
