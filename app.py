@@ -13,13 +13,16 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 from serial.tools import list_ports
 
 import camera as camlib
+import hold
 import stats
 import storage
 from runner import Run
 from sts import DEFAULT_EXT_CONFIG, MIN_SUPPLY_V, R_LOCK, Bus, BusError
 from vision import QwenReader, api_key, apply_decimals, fixed_decimals
 
-APP_VERSION = "1.5.1"     # 1.5.1: gauge readings always shown as x.xx; Qwen raw text shown alongside
+APP_VERSION = "1.7.0"     # 1.7.0: Hold & PID test tab (hold.py)
+                          # 1.6.0: interactive plotly charts (hover = camera picture) live, per run, comparison + <run>_interactive.html reports
+                          # 1.5.1: gauge readings always shown as x.xx; Qwen raw text shown alongside
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(HERE, "settings.json")
 FLASH_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "firmware", "STS32XX-Firmware", "STS32XX-Firmware",
@@ -59,6 +62,7 @@ class AppState:
         self.telem_err = ""
         self.runner_owns_bus = False
         self.run = None
+        self.hold = None                          # Hold & PID test (hold.py)
         self.sweep = None                         # limit sweep: {"min","max","n"} while the lever is moved by hand
         self.calib = self.settings.get("calib") or {}
         self.camera = camlib.Camera()
@@ -92,7 +96,8 @@ class AppState:
 
     def running(self):
         """True while a test run OR a firmware flash owns the port (every motion endpoint checks this)."""
-        return (self.run is not None and self.run.thread.is_alive()) or self.flashing()
+        return ((self.run is not None and self.run.thread.is_alive()) or self.flashing() or
+                (self.hold is not None and self.hold.alive()))
 
     def flashing(self):
         return bool(self.fw_job and self.fw_job["state"] == "running")
@@ -158,7 +163,8 @@ def state():
     return ok(version=APP_VERSION, fw_job=S.fw_job, sweep=S.sweep, calib=S.calib, connected=S.bus is not None, servo=S.servo_info, telem=S.telem, telem_err=S.telem_err,
               settings=s, camera_open=S.camera.cap is not None, camera_error=S.camera.error,
               vision=S.reader.describe(), vision_key=bool(api_key()),
-              run=S.run.view(since) if S.run else None, running=S.running())
+              run=S.run.view(since) if S.run else None, running=S.running(),
+              hold=S.hold.view(int(request.args.get("hsince", 0))) if S.hold else None)
 
 
 @app.route("/api/ports")
@@ -168,12 +174,18 @@ def ports():
 
 @app.route("/api/cameras")
 def cameras():
-    if S.camera.cap is not None:
-        return ok(cameras=sorted(set(camlib.list_cameras() + [S.camera.index])))
-    return ok(cameras=camlib.list_cameras())
+    """Cameras OpenCV can open, the one in use (if any), and the names Windows lists. Scanning takes ~2 s."""
+    cur = S.camera.index if S.camera.cap is not None else None
+    found = camlib.list_cameras(skip=cur)
+    if cur is not None:
+        img, _ = S.camera.latest()
+        found.append(dict(index=cur, w=int(img.shape[1]) if img is not None else 0,
+                          h=int(img.shape[0]) if img is not None else 0, dark=False, in_use=True))
+    found.sort(key=lambda c: c["index"])
+    return ok(cameras=found, current=cur if cur is not None else S.settings.get("camera"),
+              windows_names=camlib.windows_camera_names())
 
 
-# ------------------------------------------------------------------ servo
 @app.route("/api/connect", methods=["POST"])
 def connect():
     if S.running():
@@ -232,7 +244,7 @@ def disconnect():
         return fail("stop the run first")
     if S.bus:
         S.bus.close()
-    S.bus, S.servo_info, S.telem = None, None, None
+        S.bus, S.servo_info, S.telem = None, None, None
     return ok()
 
 
@@ -289,8 +301,8 @@ def calib_center():
     S.settings["calib"] = S.calib
     S.save_settings()
     if not good:
-        return fail("servo reads %s after centring, expected 2048 (offset %s). Is the settings lock on / alarm active?"
-                    % (pos, corr))
+        return fail(f"servo reads {pos!s} after centring, expected 2048 (offset {corr!s}). "
+                    "Is the settings lock on / alarm active?")
     return ok(pos=pos, position_correction=corr)
 
 
@@ -375,7 +387,7 @@ def calib_positions():
     if abs(gauge - away) < 2 * margin + 20:
         return fail("away end and gauge position are only %d counts apart" % abs(gauge - away))
     d = 1 if away < gauge else -1
-    start = away + d * margin                       # where every cycle backs off to
+    start = away + d * margin
     lo, hi = sorted((start, gauge + d * over))
     lo, hi = max(0, lo), min(4095, hi)
     S.settings["soft_min"], S.settings["soft_max"] = lo, hi
@@ -402,8 +414,11 @@ def estop():
     if S.run and S.running():
         S.run.estopped = True
         S.run.stop_ev.set()
+    if S.hold and S.hold.alive():
+        S.hold.estopped = True
+        S.hold.stop_ev.set()
     errs = []
-    for _ in range(3):                       # a move written just before the stop could re-enable torque: repeat
+    for _ in range(3):
         try:
             if S.bus and S.servo_info:
                 S.bus.torque(S.settings["id"], False)
@@ -657,6 +672,59 @@ def run_detail(rid):
     p = meta.get("params", {})
     return ok(meta=meta, rows=rows, summary=stats.summarise(rows, float(p.get("lever_r_mm") or 0),
                                                             int(p.get("skip_first") or 0)))
+
+
+# ------------------------------------------------------------------ hold & PID test (hold.py)
+@app.route("/api/hold/start", methods=["POST"])
+def hold_start():
+    if not S.servo_info or S.running():
+        return fail("not connected / a run or hold is already active")
+    if (np := no_power()):
+        return np
+    b, run = body(), S.settings["run"]
+    mode = b.get("mode", "legacy")
+    if mode not in ("legacy", "extension"):
+        return fail("mode = legacy | extension")
+    if mode == "extension" and S.servo_info.get("firmware_family") != "robonine":
+        return fail("RoboNine controller needs the RoboNine v9 firmware (servo reports %s)" % S.servo_info["firmware_label"])
+    try:
+        target, step = int(b["target"]), abs(int(b.get("step") or 0))
+        per_side, duration = float(b.get("step_hold_s") or 2), float(b.get("duration_s") or 0)
+        speed, accel = int(b.get("speed") or run["speed"]), int(b.get("accel") or run["accel"])
+    except (KeyError, TypeError, ValueError):
+        return fail("target, step and times must be numbers")
+    lo, hi = S.settings["soft_min"], S.settings["soft_max"]
+    if not lo <= target <= hi:
+        return fail("target %d is outside soft limits %d..%d" % (target, lo, hi))
+    if step and not (lo <= target - step and target + step <= hi):
+        return fail("steps of +/-%d around %d leave the soft limits %d..%d" % (step, target, lo, hi))
+    if per_side < 0.5 or duration < 0 or speed < 1 or accel < 100:
+        return fail("time per side >= 0.5 s, duration >= 0, speed >= 1, accel >= 100")
+    p = dict(mode=mode, id=S.settings["id"], target=target, step=step, step_hold_s=per_side, duration_s=duration,
+             speed=speed, accel=accel, acc_reg=max(1, min(254, round(accel / 100))),
+             max_temp_c=int(run.get("max_temp_c") or 65), note=b.get("note") or "")
+    S.hold = hold.HoldTest(S, p)
+    S.hold.thread.start()
+    return ok(run_id=S.hold.run_id)
+
+
+@app.route("/api/hold/stop", methods=["POST"])
+def hold_stop():
+    if S.hold and S.hold.alive():
+        S.hold.stop_ev.set()
+    return ok()
+
+
+@app.route("/api/hold/goal", methods=["POST"])
+def hold_goal():
+    """Move the hold target while holding (jog / one-off step). Stays inside the soft limits."""
+    if not (S.hold and S.hold.alive() and S.hold.state == "running"):
+        return fail("no hold is running")
+    try:
+        S.hold.request_goal(int(body()["target"]))
+    except (KeyError, TypeError, ValueError) as e:
+        return fail(str(e) or "target must be a number")
+    return ok()
 
 
 @app.route("/runs/<rid>/frames/<fn>")

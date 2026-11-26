@@ -306,9 +306,122 @@ def write_report(run_dir, meta, rows, summ, cond, qs):
           "", "## Data", "",
           "* Workbook (Summary, Samples, Telemetry, Parameters, Columns): [run.xlsx](%s/run.xlsx)" % data_rel,
           "* [samples.csv](%s/samples.csv) · [telemetry.csv](%s/telemetry.csv) · [meta.json](%s/meta.json) · "
-          "[frames/](%s/frames/)" % (data_rel, data_rel, data_rel, data_rel), ""]
+          "[frames/](%s/frames/)" % (data_rel, data_rel, data_rel, data_rel),
+          "* Interactive report (hover a point to see its picture): [%s_interactive.html](%s_interactive.html)" % (rid, rid), ""]
     with open(os.path.join(REPORT_DIR, rid + ".md"), "w", encoding="utf-8") as f:
         f.write("\n".join(L))
+
+
+# ------------------------------------------------------------------ interactive report (plotly, picture on hover)
+def _camera_text(meta):
+    flip = meta.get("camera_flip")
+    roi = meta.get("roi")
+    return "camera %s, rotate %s°%s, gauge box %s" % (
+        meta.get("camera", "?"), meta.get("camera_rotate", 0), (", flip " + flip) if flip and flip != "none" else "",
+        ("x%.3f y%.3f w%.3f h%.3f" % (roi["x"], roi["y"], roi["w"], roi["h"])) if roi else "not set")
+
+
+def write_interactive_report(run_dir, meta, rows, summ, cond, qs):
+    """docs/test_reports/<run_id>_interactive.html: gauge reading and encoder error per cycle as plotly charts.
+    Hovering a point shows the picture the camera took for that cycle (frames/ of the run, linked relatively, so the
+    report works wherever data/ and docs/ stay side by side). Plotly is read from docs/test_reports/assets/."""
+    import html as _h
+    os.makedirs(os.path.join(REPORT_DIR, "assets"), exist_ok=True)
+    vend = os.path.join(HERE, "static", "vendor", "plotly.min.js")
+    dst = os.path.join(REPORT_DIR, "assets", "plotly.min.js")
+    if os.path.exists(vend) and not os.path.exists(dst):
+        shutil.copyfile(vend, dst)
+    with open(os.path.join(HERE, "static", "benchplot.js"), encoding="utf-8") as f:
+        benchplot = f.read()
+    p, sv, rid = meta.get("params", {}), meta.get("servo") or {}, meta["run_id"]
+    frames_rel = rel(os.path.join(run_dir, "frames"), REPORT_DIR)
+    skip = int(p.get("skip_first") or 0)
+    pts = []
+    for r in rows:
+        v = stats.final_value(r)
+        if v is None or r.get("cycle", 0) <= skip:
+            continue
+        pts.append(dict(c=r["cycle"], d=r.get("dir"), v=v, e=r.get("err_counts"), a=r.get("arrive"), t=r.get("temp"),
+                        f=r.get("frame") or "", q=r.get("qwen_raw") or "",
+                        m=r.get("manual_value") not in (None, "")))
+    title = "%s · %s · %s" % (meta.get("test_id"), sv.get("firmware_label", "?"), p.get("mode"))
+    rows_html = ""
+    for d, g in (summ.get("groups") or {}).items():
+        m, a = g["gauge_mm"], g.get("gauge_arcsec") or {}
+        rows_html += "<tr><td>%s</td><td>%s</td><td>%s</td><td><b>%s</b></td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+            "from below (+)" if d == "+" else "from above (−)", m.get("n", 0), _f(m.get("mean")), _f(m.get("sd"), 4),
+            _f(m.get("range")), _f(m.get("rp3s")), _f(a.get("sd"), 1))
+    cond_html = ""
+    for k, label in dict(temp_c="Temperature °C", voltage_v="Supply V", current_ma_holding="Holding current mA",
+                         arrive_ms="Move time ms").items():
+        v = cond.get(k)
+        if v:
+            cond_html += "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+                label, _f(v["min"], 1), _f(v["max"], 1), _f(v["mean"], 1))
+    meta_rows = [("Run", "<code>%s</code>" % _h.escape(rid)), ("Firmware", _h.escape(str(sv.get("firmware_label")))),
+                 ("Control", "legacy position registers" if p.get("mode") == "legacy" else "RoboNine extension v9"),
+                 ("Started / finished", "%s / %s" % (_h.escape(str(meta.get("started"))), _h.escape(str(meta.get("finished"))))),
+                 ("Status", "<b>%s</b> %s" % (_h.escape(str(meta.get("status"))), _h.escape(meta.get("message") or ""))),
+                 ("Cycles", "%s of %s (first %s excluded)" % (meta.get("cycles_done"), p.get("cycles"), skip)),
+                 ("Target / offset / speed", "%s / %s counts · %s counts/s · accel %s" % (
+                     p.get("target"), p.get("offset"), p.get("speed"), p.get("accel"))),
+                 ("Camera", _h.escape(_camera_text(meta))), ("Lever", "%s mm" % p.get("lever_r_mm")),
+                 ("Note", _h.escape(p.get("note") or ""))]
+    mt = "".join("<tr><th>%s</th><td>%s</td></tr>" % kv for kv in meta_rows)
+    page = INTERACTIVE_TEMPLATE
+    for k, v in dict(TITLE=_h.escape(title), RID=rid, MT=mt, ROWS=rows_html, COND=cond_html,
+                     STALLED=cond.get("arrivals_not_ok", 0), QREAD=qs["read"], QASKED=qs["asked"],
+                     QCORR=qs["corrected"], QEXCL=qs["excluded"], DATA=rel(run_dir, REPORT_DIR),
+                     PTS=json.dumps(pts, separators=(",", ":")), FR=json.dumps(frames_rel)).items():
+        page = page.replace("@@%s@@" % k, str(v))
+    page = page.replace("@@JS@@", benchplot)      # last: the JS may contain anything
+    with open(os.path.join(REPORT_DIR, rid + "_interactive.html"), "w", encoding="utf-8") as f:
+        f.write(page)
+
+
+INTERACTIVE_TEMPLATE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>@@TITLE@@</title>
+<style>:root{--bg:#fff;--fg:#1d2330;--mut:#5b6475;--card:#f4f6fa;--line:#d9dee8;--plus:#2563eb;--minus:#d97706}
+@media(prefers-color-scheme:dark){:root{--bg:#14171d;--fg:#e6e9ef;--mut:#9aa3b5;--card:#1d222b;--line:#323946}}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,Segoe UI,sans-serif;max-width:1150px;margin:0 auto;padding:20px 16px}
+h1{font-size:1.3rem;margin:.2em 0}h2{font-size:1.05rem;margin-top:1.6em}.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:10px 0;overflow-x:auto}
+table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left;font-size:.9rem}.mut{color:var(--mut)}</style>
+<script src="assets/plotly.min.js"></script></head><body>
+<h1>@@TITLE@@</h1><div class="mut">Interactive report. Hover a point to see the picture the camera took for that cycle. Drag to zoom, double-click to reset.
+ <a href="@@RID@@.md">Text report</a></div>
+<div class="card"><table>@@MT@@</table></div>
+<h2>Gauge reading per cycle</h2><div id="g1" style="height:380px"></div>
+<h2>Encoder error per cycle (counts)</h2><div id="g2" style="height:300px"></div>
+<h2>Repeatability</h2><div class="card"><table><tr><th>Approach</th><th>n</th><th>mean mm</th><th>SD mm</th><th>range mm</th><th>±3SD mm</th><th>SD arcsec</th></tr>@@ROWS@@</table>
+<p class="mut">Arrivals not ok (stalled / timeout, drawn as ✕): @@STALLED@@. Qwen read @@QREAD@@ of @@QASKED@@ frames; operator corrected @@QCORR@@, excluded @@QEXCL@@.</p></div>
+<h2>Conditions</h2><div class="card"><table><tr><th></th><th>min</th><th>max</th><th>mean</th></tr>@@COND@@</table></div>
+<p class="mut">Data: <a href="@@DATA@@/samples.csv">samples.csv</a> · <a href="@@DATA@@/telemetry.csv">telemetry.csv</a> · <a href="@@DATA@@/meta.json">meta.json</a> · <a href="@@DATA@@/run.xlsx">run.xlsx</a></p>
+<script>@@JS@@</script>
+<script>
+const PTS=@@PTS@@, FR=@@FR@@;
+function series(key){const out=[];[['+','from below (+)','#2563eb'],['-','from above (−)','#d97706']].forEach(([d,name,col])=>{
+  const rr=PTS.filter(r=>r.d===d);if(!rr.length)return;
+  out.push({name,color:col,pts:rr.map(r=>({x:r.c,y:key==='v'?r.v:r.e,bad:r.a!=='ok',img:r.f?FR+'/'+r.f:'',
+    cap:`cycle ${r.c} · ${d==='+'?'from below':'from above'} · ${r.v.toFixed(2)} mm`+(r.q?` (Qwen saw ${r.q})`:'')+(r.m?' · corrected':'')+` · arrive ${r.a} · enc err ${r.e} counts`+(r.t!=null?` · ${r.t} °C`:'')}))});});return out;}
+BenchPlot.draw(document.getElementById('g1'),series('v'),{dec:2,avg:50,height:380});
+BenchPlot.draw(document.getElementById('g2'),series('e'),{dec:0,dtick:1,ytitle:'encoder error (counts)',height:300});
+</script></body></html>
+"""
+
+
+def write_all_interactive():
+    """Interactive report for every published run (used once to add them to runs recorded before v1.6.0)."""
+    done = []
+    for d in all_run_dirs():
+        if d.startswith(STAGING):
+            continue
+        meta, rows, _ = load_run(d)
+        if not meta or not rows:
+            continue
+        write_interactive_report(d, meta, rows, meta.get("summary") or {}, meta.get("conditions") or {},
+                                 meta.get("qwen") or dict(read=0, asked=0, corrected=0, excluded=0))
+        done.append(meta["run_id"])
+    return done
 
 
 def write_indexes():
@@ -347,11 +460,11 @@ def write_indexes():
     L = ["# Test reports · STS3215 firmware comparison", "",
          "Generated by `software/sts3215-repeat-bench` after every run (do not edit by hand). "
          "Test definitions: [../TEST-PLAN.md](../TEST-PLAN.md). Data: `data/<test>/<run>/`, index `data/runs-index.csv`.",
-         "", "| Report | Test | Firmware | Mode | Dir | n | SD mm | range mm | SD arcsec | (+)−(−) mm | max °C | status |",
-         "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+         "", "| Report | Interactive | Test | Firmware | Mode | Dir | n | SD mm | range mm | SD arcsec | (+)−(−) mm | max °C | status |",
+         "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in table:
-        L.append("| [%s](%s.md) | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
-            r["run_id"][:17], r["run_id"], r["test_id"], r["firmware"], r["mode"], r["dir"], r["n"] or 0,
+        L.append("| [%s](%s.md) | [plot](%s_interactive.html) | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
+            r["run_id"][:17], r["run_id"], r["run_id"], r["test_id"], r["firmware"], r["mode"], r["dir"], r["n"] or 0,
             _f(r["sd_mm"], 4), _f(r["range_mm"]), _f(r["sd_arcsec"], 1), _f(r["lost_motion_mm"]),
             _f(r["temp_max_c"], 0), r["status"]))
     with open(os.path.join(REPORT_DIR, "README.md"), "w", encoding="utf-8") as f:
@@ -375,6 +488,7 @@ def finalize(run_dir, write_index=True):
         meta["data_dir"] = rel(run_dir, PROJECT)
         meta["report"] = rel(os.path.join(REPORT_DIR, meta["run_id"] + ".md"), PROJECT)
         write_report(run_dir, meta, rows, summ, cond, qs)
+        write_interactive_report(run_dir, meta, rows, summ, cond, qs)
     write_json(os.path.join(run_dir, "meta.json"), meta)
     if write_index and not in_staging:
         write_indexes()

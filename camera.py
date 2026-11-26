@@ -5,15 +5,40 @@ import time
 import cv2
 
 
-def list_cameras(max_index=6):
+def list_cameras(max_index=8, skip=None):
+    """Every camera index OpenCV can open: [{index, w, h, dark}]. `skip` = the index this program already holds open
+    (it can't be opened twice); the caller adds it. Two reads, because the first frame is often black."""
     found = []
     for i in range(max_index):
+        if i == skip:
+            continue
         cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
-        ok = cap.isOpened() and cap.read()[0]
-        cap.release()
-        if ok:
-            found.append(i)
+        try:
+            ok, img = (False, None)
+            if cap.isOpened():
+                for _ in range(5):                       # warm-up: the first frames are black / half exposed
+                    ok, img = cap.read()
+                    time.sleep(0.1)
+            if ok and img is not None:
+                dark = float(img.mean()) < 5
+                found.append(dict(index=i, w=int(img.shape[1]), h=int(img.shape[0]), dark=dark))
+        finally:
+            cap.release()
     return found
+
+
+def windows_camera_names():
+    """Camera names Windows itself lists (to tell 'not plugged in / not detected' from 'in use by another program')."""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-PnpDevice -Class Camera -PresentOnly -ErrorAction SilentlyContinue | "
+             "Where-Object Status -eq OK | Select-Object -ExpandProperty FriendlyName"],
+            capture_output=True, text=True, timeout=8, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return [x.strip() for x in out.stdout.splitlines() if x.strip()]
+    except Exception:
+        return []
 
 
 class Camera:
@@ -41,37 +66,68 @@ class Camera:
         return img
 
     def open(self, index, width=1280, height=720):
+        """Open camera `index`. The new camera is opened and checked BEFORE the old one is stopped, so a failed
+        switch (busy, unplugged, black placeholder) leaves the working camera running instead of killing it."""
+        index = int(index)
+        if self.cap is not None and self.running and self.index == index:
+            return                                   # already open: DirectShow can't open one device twice
+        cap = None
+        try:
+            cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+            if not cap.isOpened():
+                raise RuntimeError("camera %d did not open: it is in use by another program (Windows Camera, a "
+                                   "browser tab, another bench window) or unplugged. Click Find cameras." % index)
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            ok, img = cap.read()
+            if not ok or img is None:
+                raise RuntimeError("camera %d opened but delivers no picture" % index)
+        except Exception as e:                       # includes cv2.error ("Unknown C++ exception from OpenCV code")
+            if cap is not None:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+            msg = str(e) if isinstance(e, RuntimeError) else "camera %d: OpenCV error: %s" % (index, e)
+            if self.cap is None:
+                self.error = msg
+            raise RuntimeError(msg) from None
         self.close()
-        cap = cv2.VideoCapture(int(index), cv2.CAP_DSHOW)
-        if not cap.isOpened():
-            self.error = "camera %s did not open" % index
-            raise RuntimeError(self.error)
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        self.cap, self.index, self.error = cap, int(index), ""
+        self.cap, self.index, self.error = cap, index, ""
         self.running = True
-        self.thread = threading.Thread(target=self._loop, name="camera", daemon=True)
+        self.thread = threading.Thread(target=self._loop, args=(cap,), name="camera", daemon=True)
         self.thread.start()
 
-    def _loop(self):
-        while self.running:
-            ok, img = self.cap.read()
-            if not ok:
-                self.error = "camera read failed"
-                time.sleep(0.1)
-                continue
-            img = self.orient(img)
-            with self.lock:
-                self.frame, self.frame_t = img, time.time()
+    def _loop(self, cap):
+        """Owns `cap`: it is read and released only here, so close() can never release it under a running read."""
+        try:
+            while self.running and self.cap is cap:
+                try:
+                    ok, img = cap.read()
+                except Exception as e:               # cv2.error when the device vanishes
+                    self.error = "camera read failed: %s" % e
+                    time.sleep(0.2)
+                    continue
+                if not ok:
+                    self.error = "camera read failed"
+                    time.sleep(0.1)
+                    continue
+                img = self.orient(img)
+                with self.lock:
+                    self.frame, self.frame_t = img, time.time()
+        finally:
+            try:
+                cap.release()
+            except Exception:
+                pass
 
     def close(self):
         self.running = False
-        if self.thread:
-            self.thread.join(timeout=1.0)
-        if self.cap:
-            self.cap.release()
+        t = self.thread
+        if t:
+            t.join(timeout=3.0)                      # the thread releases the capture itself
         self.cap, self.thread, self.frame = None, None, None
 
     def latest(self):

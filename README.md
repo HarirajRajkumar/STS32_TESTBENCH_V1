@@ -32,6 +32,23 @@ torque off at once and stops the run.
 In step 5, **Standard** control is the legacy STS position registers (the same commands on both firmwares), and
 **RoboNine controller** is the v9 extension mode.
 
+**Hold & PID (v1.7.0).** The **Hold & PID** tab keeps the torque on at one position and logs how the position loop holds it
+(about 100 samples/s: position, goal, error, current, load, temperature). Push the lever by hand to see how it fights
+back, or set *Step ± counts* and the bench steps the goal around the target and measures rise time (10→90 %),
+overshoot, settling time (band ±max(2 counts, 2 % of the step)) and steady-state error. The −100…+100 buttons move the
+target while holding. *Standard* uses the servo's own P / D / I (registers 0x15-0x17 are read and recorded, never
+written); *RoboNine controller* uses kp / kd / ki from the controller config, applied when the hold starts (edit, Save,
+Stop, Start). **Stop** keeps the lever held; **E-STOP** cuts torque. Each hold is saved to `data/T5-hold/<run>/` and
+`docs/test_reports/<run>_interactive.html`, so a PID change can be compared run to run.
+
+**Interactive plots (v1.6.0).** The live plot, a run's detail view and the comparison are plotly charts. Hover a point to
+see the picture the camera took for that cycle (with Qwen's raw text, arrival status, encoder error and temperature);
+✕ marks cycles that did not arrive. Drag to zoom, double-click to reset. The live plot keeps your zoom while the run
+continues. Each run also writes `docs/test_reports/<run>_interactive.html` with the same hover pictures. Plotly is
+bundled (`static/vendor/plotly.min.js`, copied to `docs/test_reports/assets/`), so nothing needs the internet.
+The camera settings of each run (index, rotation, flip, gauge box) are in the report and the comparison table, so a
+run after a camera change can be told apart.
+
 **Wobble** (step 5, off when wiggles = 0) disturbs each approach before the measured move to the gauge:
 *on the way* wiggles ±size counts around the midpoint; *at the gauge* touches the gauge and lifts off by size counts.
 The final move and the reading are unchanged, so compare runs with and without wobble to see whether the touch

@@ -60,6 +60,8 @@ pre{background:var(--soft);border-radius:8px;padding:10px;overflow:auto;font-siz
 .box{border:2px solid var(--warn);border-radius:10px;padding:12px;margin-top:10px}
 .mono{font-family:Consolas,monospace;font-size:12px}
 </style>
+<script src="/static/vendor/plotly.min.js"></script>
+<script src="/static/benchplot.js"></script>
 </head>
 <body>
 <header>
@@ -76,6 +78,7 @@ pre{background:var(--soft);border-radius:8px;padding:10px;overflow:auto;font-siz
   <button data-s="3"><i>3</i>Centre</button>
   <button data-s="4"><i>4</i>Positions</button>
   <button data-s="6"><i>5</i>Run test</button>
+  <button data-s="9"><i>◎</i>Hold &amp; PID</button>
   <span class="sep"></span>
   <button data-s="7"><i>≡</i>Results</button>
   <button data-s="8"><i>⇄</i>Change firmware</button>
@@ -119,7 +122,7 @@ pre{background:var(--soft);border-radius:8px;padding:10px;overflow:auto;font-siz
         <option value="">off: keep Qwen's text (not recommended)</option><option value="1">1 (0.9)</option><option value="2">2 (0.99)</option><option value="3">3 (0.999)</option></select></label></div>
       <div class="row">
         <label>Camera<select id="camSel"><option>0</option></select></label>
-        <button id="camFind">Find</button>
+        <button id="camFind">Find cameras</button>
         <button id="camOpen" class="big">Open</button>
         <label>Rotate<select id="camRot"><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></label>
       </div>
@@ -265,6 +268,49 @@ pre{background:var(--soft);border-radius:8px;padding:10px;overflow:auto;font-siz
       </details>
     </div>
 
+    <!-- 9 HOLD & PID -->
+    <div class="step" id="s9">
+      <h2>Hold &amp; PID test</h2>
+      <p class="say">Keeps the torque <b>on</b> at one target and records how well the position loop holds it. Push the lever by hand
+        to see how it fights back, or set a step size and the bench steps ± around the target and measures rise time, overshoot and
+        settling time. Change the PID, stop, start again and compare the reports.</p>
+      <h3>Control</h3>
+      <div class="choice">
+        <label><input type="radio" name="hmode" value="legacy" checked> Standard (the servo's own P / D / I)</label>
+        <label><input type="radio" name="hmode" value="extension"> RoboNine controller (kp / kd / ki below)</label>
+      </div>
+      <div class="row">
+        <label>Hold at position<input id="h_target" type="number" style="width:110px"></label>
+        <button id="hUsePos">Use present position</button>
+      </div>
+      <div class="row">
+        <label>Step ± counts (0 = just hold)<input id="h_step" type="number" min="0" value="0" style="width:110px"></label>
+        <label>Time per side (s)<input id="h_per" type="number" min="0.5" step="0.5" value="2" style="width:90px"></label>
+        <label>Stop after (s, 0 = when I press Stop)<input id="h_dur" type="number" min="0" value="0" style="width:110px"></label>
+      </div>
+      <div class="row">
+        <button id="hStart" class="big green">Start hold</button>
+        <button id="hStop">Stop (keeps holding)</button>
+      </div>
+      <div id="hMsg" class="msg"></div>
+      <div id="hLive" class="nums"></div>
+      <div id="hPid" class="mut"></div>
+      <h3>Move the target while holding</h3>
+      <div class="row">
+        <button data-hd="-100">−100</button><button data-hd="-20">−20</button><button data-hd="-5">−5</button>
+        <button data-hd="5">+5</button><button data-hd="20">+20</button><button data-hd="100">+100</button>
+      </div>
+      <div id="hPos" style="height:260px"></div>
+      <div id="hErr" style="height:220px"></div>
+      <details><summary>RoboNine controller settings (kp / kd / ki, limits)</summary>
+        <p class="mut">Applied when the hold starts: edit, <b>Save</b>, then Stop and Start again. Values are Q8 (256 = 1.0).</p>
+        <textarea id="hCfg" class="mono" style="width:100%;height:150px"></textarea>
+        <div class="row"><button id="hSave">Save config</button></div>
+      </details>
+      <div class="mut">When you press Stop the servo keeps holding where it is. Use <b>E-STOP</b> (top right) to cut torque.
+        The result is saved to data/T5-hold/ and docs/test_reports/ (interactive plot).</div>
+    </div>
+
     <!-- 7 RESULTS -->
     <div class="step" id="s7">
       <h2>Results</h2>
@@ -274,7 +320,7 @@ pre{background:var(--soft);border-radius:8px;padding:10px;overflow:auto;font-siz
       <div class="scroll" style="max-height:240px"><table id="runsTbl"></table></div>
       <h3>Comparison</h3>
       <div class="scroll" style="max-height:none"><table id="cmpTbl"></table></div>
-      <canvas id="cmpChart" width="900" height="300" style="margin-top:10px"></canvas>
+      <div id="cmpChart" style="margin-top:10px;height:340px"></div>
       <div id="detail" style="margin-top:12px"></div>
     </div>
 
@@ -324,8 +370,8 @@ pre{background:var(--soft);border-radius:8px;padding:10px;overflow:auto;font-siz
       <div class="live" id="live"><span class="mut">Connect the servo to see live values.</span></div>
     </div>
     <div class="card" style="margin-top:16px">
-      <canvas id="chart" width="900" height="300"></canvas>
-      <div class="mut">Gauge reading per cycle: <span class="dp">● from below</span> <span class="dm">● from above</span></div>
+      <div id="chart" style="height:340px"></div>
+      <div class="mut">Gauge reading per cycle: <span class="dp">● from below</span> <span class="dm">● from above</span> · ✕ = did not arrive. <b>Hover a point to see the picture the camera took.</b> Drag to zoom, double-click to reset.</div>
     </div>
   </section>
 </main>
@@ -344,7 +390,8 @@ let ST=null, rowsCache=[], selectedRuns=new Set(), runsList=[];
 
 // ---------- steps
 function show(n){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('act',b.dataset.s==n));
-  document.querySelectorAll('.step').forEach(s=>s.classList.toggle('act',s.id==='s'+n));if(n==7)loadRuns();}
+  document.querySelectorAll('.step').forEach(s=>s.classList.toggle('act',s.id==='s'+n));if(n==7)loadRuns();
+  setTimeout(()=>['hPos','hErr','detChart','cmpChart','chart'].forEach(id=>{const d=$(id);if(d&&d._fullLayout&&d.offsetWidth)Plotly.Plots.resize(d);}),60);}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>show(b.dataset.s));
 document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>show(b.dataset.go));
 
@@ -362,9 +409,19 @@ $('scan').onclick=async()=>{$('connMsg').textContent='searching…';const j=awai
 $('disconnect').onclick=async()=>{const j=await api('/api/disconnect',{});$('connMsg').innerHTML=j.ok?good('Port released. You can flash now.'):bad(j.error);};
 
 // ---------- 2 camera
-$('camFind').onclick=async()=>{$('camMsg').textContent='searching…';const j=await api('/api/cameras');
-  $('camSel').innerHTML=(j.cameras||[]).map(i=>`<option>${i}</option>`).join('');$('camMsg').textContent=(j.cameras||[]).length+' camera(s) found';};
-$('camOpen').onclick=async()=>{const j=await api('/api/camera',{index:+$('camSel').value});$('camMsg').innerHTML=j.ok?'':bad(j.error);$('vidImg').src='/video.mjpg?'+Date.now();};
+async function findCams(){$('camMsg').textContent='searching… (about 3 s)';$('camFind').disabled=true;const j=await api('/api/cameras');$('camFind').disabled=false;
+  if(!j.ok){$('camMsg').innerHTML=bad(j.error||'camera search failed');return;}
+  const cams=j.cameras||[],cur=j.current;
+  $('camSel').innerHTML=cams.length?cams.map(c=>`<option value="${c.index}" ${c.index===cur?'selected':''}>Camera ${c.index}${c.w?` · ${c.w}×${c.h}`:''}${c.dark?' · black picture (lens covered or used by another program)':''}${c.in_use?' · in use':''}</option>`).join(''):
+    `<option value="${cur??0}">no camera found</option>`;
+  const names=j.windows_names||[],n=cams.length;
+  $('camMsg').innerHTML=(n?good(`${n} camera(s) can be opened`):bad('no camera can be opened'))+
+    (names.length?`<div class="mut">Windows lists: ${names.join(' · ')}</div>`:'')+
+    (names.length>n?'<div class="warnc">Windows sees more cameras than can be opened: close any program using the camera (Camera app, browser tab, FT/other bench) and click Find again.</div>':'')+
+    '<div class="mut">Camera numbers can change when a camera is unplugged or plugged in: check the picture after choosing.</div>';}
+$('camFind').onclick=findCams;
+$('camSel').onchange=()=>$('camOpen').click();
+$('camOpen').onclick=async()=>{const j=await api('/api/camera',{index:+$('camSel').value});if(!j.ok)$('camMsg').innerHTML=bad(j.error);$('vidImg').src='/video.mjpg?'+Date.now();};
 const applyOrient=async()=>{const j=await api('/api/camera/orient',{rotate:+$('camRot').value,flip:$('camFlip').value});
   $('camMsg').innerHTML=j.ok?(j.roi_cleared?'<span class="warnc">Picture turned. Draw the box again.</span>':''):bad(j.error);};
 $('camRot').onchange=applyOrient;$('camFlip').onchange=applyOrient;
@@ -411,9 +468,9 @@ let formLoaded=false;
 const radio=(n,v)=>{const el=document.querySelector(`input[name=${n}][value="${v}"]`);if(el)el.checked=true;};
 function fillForm(s){RF.forEach(k=>{const el=$('r_'+k);if(el&&s.run[k]!==undefined)el.value=s.run[k]??'';});
   radio('mode',s.run.mode);
-  $('extCfg').value=JSON.stringify(s.ext_config,null,1);
+  $('extCfg').value=$('hCfg').value=JSON.stringify(s.ext_config,null,1);
   $('vUrl').value=s.vision_url||'';$('vModel').value=s.vision_model||'';$('sid').value=s.id;$('baud').value=s.baud;
-  $('camSel').innerHTML=`<option>${s.camera}</option>`;$('camRot').value=s.cam_rotate||0;$('camFlip').value=s.cam_flip||'none';
+  $('camSel').innerHTML=`<option value="${s.camera}">Camera ${s.camera}</option>`;findCams();$('camRot').value=s.cam_rotate||0;$('camFlip').value=s.cam_flip||'none';
   updCycles();updTravel();}
 function formParams(){$('r_mode').value=document.querySelector('input[name=mode]:checked').value;const p={};RF.forEach(k=>p[k]=$('r_'+k).value);return p;}
 function updTravel(){const off=+$('r_offset').value,r=+$('r_lever_r_mm').value,deg=off*360/4096,tg=+$('r_target').value,d=$('r_direction').value==='+'?1:-1;
@@ -450,25 +507,24 @@ function rowsHtml(rows,runId){let h='<tr><th>#</th><th>cycle</th><th>dir</th><th
     <td>${r.frame?`<img class="thumb" src="/runs/${runId}/frames/${r.frame}" loading="lazy">`:''}</td></tr>`;});return h;}
 function bindEdits(tbl,runId,rows){tbl.querySelectorAll('input').forEach(el=>el.onchange=async()=>{const i=+el.dataset.i,row=tbl.querySelector(`tr:nth-child(${i+2})`);
   const m=row.querySelector('input[data-k=m]').value,x=row.querySelector('input[data-k=x]').checked;await api('/api/run/edit',{run_id:runId,idx:i,manual_value:m,exclude:x});
-  rows[i].manual_value=m===''?null:+m;rows[i].exclude=x;});
+  rows[i].manual_value=m===''?null:+m;rows[i].exclude=x;plotSig='';if($('detChart')&&$('detTbl')===tbl)plotRows($('detChart'),rows,runId);});
   tbl.querySelectorAll('img.thumb').forEach(im=>im.onclick=()=>{$('zoom').querySelector('img').src=im.src;$('zoom').style.display='flex';});}
 $('zoom').onclick=()=>$('zoom').style.display='none';
 
 // ---------- chart
 const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-function plot(canvas,series){const c=canvas,ctx=c.getContext('2d'),W=c.width,H=c.height,P=48;ctx.clearRect(0,0,W,H);
-  const pts=series.flatMap(s=>s.pts);if(!pts.length){ctx.fillStyle=css('--mut');ctx.font='15px sans-serif';ctx.fillText('no readings yet',W/2-50,H/2);return;}
-  let x0=Math.min(...pts.map(p=>p[0])),x1=Math.max(...pts.map(p=>p[0])),y0=Math.min(...pts.map(p=>p[1])),y1=Math.max(...pts.map(p=>p[1]));
-  if(x1===x0)x1=x0+1;if(y1-y0<0.01){const m=(y0+y1)/2;y0=m-0.005;y1=m+0.005;}const pad=(y1-y0)*0.1;y0-=pad;y1+=pad;
-  const X=x=>P+(x-x0)/(x1-x0)*(W-P-12),Y=y=>H-26-(y-y0)/(y1-y0)*(H-40);
-  ctx.strokeStyle=css('--line');ctx.fillStyle=css('--mut');ctx.font='12px sans-serif';ctx.lineWidth=1;
-  for(let i=0;i<=4;i++){const v=y0+(y1-y0)*i/4,y=Y(v);ctx.beginPath();ctx.moveTo(P,y);ctx.lineTo(W-12,y);ctx.stroke();ctx.fillText(v.toFixed(3),2,y+4);}
-  ctx.fillText('cycle',W-40,H-6);
-  series.forEach(s=>{ctx.fillStyle=s.color;s.pts.forEach(p=>{ctx.beginPath();ctx.arc(X(p[0]),Y(p[1]),3.5,0,7);ctx.fill();});});
-  let lx=P+6;series.forEach(s=>{if(!s.label)return;ctx.fillStyle=s.color;ctx.fillRect(lx,6,9,9);ctx.fillStyle=css('--fg');ctx.fillText(s.label,lx+13,15);lx+=ctx.measureText(s.label).width+30;});}
 const val=r=>r.exclude?null:(r.manual_value!==null&&r.manual_value!==undefined&&r.manual_value!==''?+r.manual_value:r.qwen_value);
-function plotRows(canvas,rows){plot(canvas,[{color:css('--plus'),pts:rows.filter(r=>r.dir==='+'&&val(r)!=null).map(r=>[r.cycle,val(r)])},
-  {color:css('--minus'),pts:rows.filter(r=>r.dir==='-'&&val(r)!=null).map(r=>[r.cycle+0.15,val(r)])}]);}
+// one plotly point per reading; hovering shows frames/<frame> of that run
+function rowPts(rows,runId,dir,dx){return rows.filter(r=>(dir===null||r.dir===dir)&&val(r)!=null).map(r=>({x:r.cycle+(dx||0),y:val(r),bad:r.arrive!=='ok',
+  img:r.frame?`/runs/${runId}/frames/${r.frame}`:'',
+  cap:`cycle ${r.cycle} · ${r.dir==='+'?'from below':'from above'} · ${fmtG(val(r))} mm`+(r.qwen_raw?` (Qwen saw ${r.qwen_raw})`:'')+(r.manual_value!=null&&r.manual_value!==''?' · corrected':'')+
+    ` · arrive ${r.arrive} · enc err ${fmt(r.err_counts,0)}`+(r.temp!=null?` · ${r.temp} °C`:'')}));}
+function plotRows(div,rows,runId){const dirs=new Set(rows.map(r=>r.dir));
+  const S=[];if(dirs.has('+'))S.push({name:'from below (+)',color:css('--plus'),pts:rowPts(rows,runId,'+')});
+  if(dirs.has('-'))S.push({name:'from above (−)',color:css('--minus'),pts:rowPts(rows,runId,'-')});
+  BenchPlot.draw(div,S,{dec:gDec(),avg:50,height:340});}
+let plotSig='';   // redraw only when the readings changed (the poll runs every 0.5 s)
+const rowsSig=rows=>rows.length+'|'+rows.filter(r=>r.qwen_status==='pending').length+'|'+rows.reduce((a,r)=>a+(val(r)||0)+(r.exclude?1:0),0).toFixed(3);
 
 // ---------- 7 results
 async function loadRuns(){const j=await api('/api/runs');runsList=j.runs||[];
@@ -476,18 +532,19 @@ async function loadRuns(){const j=await api('/api/runs');runsList=j.runs||[];
     `<tr><td><input type="checkbox" data-r="${r.run_id}" ${selectedRuns.has(r.run_id)?'checked':''}></td><td style="text-align:left"><a href="#" data-open="${r.run_id}" style="color:var(--acc)">${r.run_id}</a></td><td>${r.firmware||''}</td><td>${r.mode==='extension'?'RoboNine':'standard'}</td><td>${r.test_id}</td><td>${r.status}</td><td style="text-align:left">${r.note||''}</td></tr>`).join('');
   $('runsTbl').querySelectorAll('input').forEach(c=>c.onchange=()=>{c.checked?selectedRuns.add(c.dataset.r):selectedRuns.delete(c.dataset.r);compare();});
   $('runsTbl').querySelectorAll('a').forEach(a=>a.onclick=e=>{e.preventDefault();openRun(a.dataset.open);});compare();}
+const camTxt=m=>m.camera===undefined?'?':`cam ${m.camera} · rot ${m.camera_rotate||0}°${m.camera_flip&&m.camera_flip!=='none'?' · '+m.camera_flip:''}`;
 const PAL=['#2563eb','#d97706','#16a34a','#dc2626','#7c3aed','#0d9488','#db2777','#65a30d'];
-async function compare(){const ids=[...selectedRuns];let h='<tr><th>run</th><th>firmware</th><th>control</th><th>dir</th><th>n</th><th>SD mm</th><th>range mm</th><th>±3SD mm</th><th>SD arcsec</th><th>+/− diff mm</th></tr>';
+async function compare(){const ids=[...selectedRuns];let h='<tr><th>run</th><th>firmware</th><th>control</th><th>camera</th><th>dir</th><th>n</th><th>SD mm</th><th>range mm</th><th>±3SD mm</th><th>SD arcsec</th><th>+/− diff mm</th></tr>';
   const series=[];let k=0;
   for(const id of ids){const j=await api('/api/runs/'+id);if(!j.ok)continue;const s=j.summary,m=j.meta,col=PAL[k++%PAL.length];
-    for(const [d,g] of Object.entries(s.groups||{})){const a=g.gauge_arcsec||{};h+=`<tr><td style="color:${col}">${id.slice(0,17)}</td><td>${(m.servo||{}).firmware_label||''}</td><td>${m.params.mode==='extension'?'RoboNine':'standard'}</td><td>${d}</td><td>${g.gauge_mm.n||0}</td><td><b>${fmt(g.gauge_mm.sd,4)}</b></td><td>${fmt(g.gauge_mm.range)}</td><td>${fmt(g.gauge_mm.rp3s)}</td><td>${fmt(a.sd,1)}</td><td>${s.lost_motion_mm!==undefined?fmt(s.lost_motion_mm):''}</td></tr>`;}
+    for(const [d,g] of Object.entries(s.groups||{})){const a=g.gauge_arcsec||{};h+=`<tr><td style="color:${col}">${id.slice(0,17)}</td><td>${(m.servo||{}).firmware_label||''}</td><td>${m.params.mode==='extension'?'RoboNine':'standard'}</td><td>${camTxt(m)}</td><td>${d}</td><td>${g.gauge_mm.n||0}</td><td><b>${fmt(g.gauge_mm.sd,4)}</b></td><td>${fmt(g.gauge_mm.range)}</td><td>${fmt(g.gauge_mm.rp3s)}</td><td>${fmt(a.sd,1)}</td><td>${s.lost_motion_mm!==undefined?fmt(s.lost_motion_mm):''}</td></tr>`;}
     const rows=j.rows,mean=(()=>{const v=rows.map(val).filter(x=>x!=null);return v.length?v.reduce((a,b)=>a+b)/v.length:0})();
-    series.push({color:col,label:((m.servo||{}).firmware_label||'')+' · '+m.params.mode,pts:rows.filter(r=>val(r)!=null).map(r=>[r.cycle,val(r)-mean])});}
-  $('cmpTbl').innerHTML=ids.length?h:'<tr><td class="mut">tick runs above</td></tr>';plot($('cmpChart'),series);}
+    series.push({color:col,name:id.slice(0,17)+' · '+((m.servo||{}).firmware_label||'')+' · '+m.params.mode,pts:rowPts(rows,id,null).map(p=>Object.assign(p,{y:p.y-mean}))});}
+  $('cmpTbl').innerHTML=ids.length?h:'<tr><td class="mut">tick runs above</td></tr>';BenchPlot.draw($('cmpChart'),series,{dec:3,ytitle:'reading minus run mean (mm)',height:340});}
 async function openRun(id){const j=await api('/api/runs/'+id);if(!j.ok)return;const m=j.meta;
   $('detail').innerHTML=`<h3>${id}</h3><div class="mut">${(m.servo||{}).firmware_label} · ${m.params.mode} · position ${m.params.target} · ${m.status} ${m.message||''}</div>
-    <div class="row"><button id="fixDec">Fix decimal point (gauge shows 2 decimals)</button><span id="fixMsg" class="mut"></span></div>${statsHtml(j.summary)}<div class="scroll" style="margin-top:8px"><table id="detTbl"></table></div><div class="mut">${m.data_dir?`Excel: ${m.data_dir}/run.xlsx · Report: ${m.report}`:'still running'}</div>`;
-  $('detTbl').innerHTML=rowsHtml(j.rows,id);bindEdits($('detTbl'),id,j.rows);
+    <div class="row"><button id="fixDec">Fix decimal point (gauge shows 2 decimals)</button><span id="fixMsg" class="mut"></span></div>${statsHtml(j.summary)}<div class="mut" style="margin-top:6px">Camera: ${camTxt(m)}. Hover a point for its picture.</div><div id="detChart" style="height:340px"></div><div class="scroll" style="margin-top:8px"><table id="detTbl"></table></div><div class="mut">${m.data_dir?`Excel: ${m.data_dir}/run.xlsx · Report: ${m.report}`:'still running'}</div>`;
+  $('detTbl').innerHTML=rowsHtml(j.rows,id);bindEdits($('detTbl'),id,j.rows);plotRows($('detChart'),j.rows,id);
   $('fixDec').onclick=async()=>{$('fixMsg').textContent='fixing…';const k=await api('/api/run/decimals',{run_id:id,decimals:2});
     if(!k.ok){$('fixMsg').innerHTML=bad(k.error);return;}await openRun(id);$('fixMsg').innerHTML=good(`${k.fixed} readings fixed. Excel and report updated.`);compare();};}
 $('refreshRuns').onclick=loadRuns;
@@ -539,10 +596,38 @@ function fwJobView(f){if(!f)return;$('fwLog').style.display='block';$('fwLog').t
     f.state==='done'?good(`Done. Servo now runs ${f.firmware_after}. Redo 3 Centre and 4 Positions.`)+(f.note?`<br><span class="warnc">${f.note}</span>`:''):
     bad(f.error||'failed');}
 
+// ---------- 9 hold & PID
+let holdRows=[],holdRun=null,holdN=0;
+$('hUsePos').onclick=()=>{const t=ST&&ST.telem;if(t)$('h_target').value=Math.round(t.pos);else $('hMsg').innerHTML=bad('connect the servo first');};
+$('hStart').onclick=async()=>{holdRows=[];holdN=0;holdRun=null;
+  const j=await api('/api/hold/start',{mode:document.querySelector('input[name=hmode]:checked').value,target:+$('h_target').value,
+    step:+$('h_step').value||0,step_hold_s:+$('h_per').value||2,duration_s:+$('h_dur').value||0});
+  $('hMsg').innerHTML=j.ok?good('Holding with torque on. Push the lever, or use the buttons to move the target.'):bad(j.error);};
+$('hStop').onclick=async()=>{await api('/api/hold/stop',{});$('hMsg').innerHTML='stopping…';};
+document.querySelectorAll('[data-hd]').forEach(b=>b.onclick=async()=>{const h=ST&&ST.hold;if(!h)return;
+  const j=await api('/api/hold/goal',{target:h.goal+(+b.dataset.hd)});if(!j.ok)$('hMsg').innerHTML=bad(j.error);});
+$('hSave').onclick=async()=>{try{const j=await api('/api/ext_config',{config:JSON.parse($('hCfg').value)});
+  if(j.ok){$('extCfg').value=$('hCfg').value=JSON.stringify(j.config,null,1);}$('hMsg').innerHTML=j.ok?good('config saved (applies at the next Start)'):bad(j.error);}
+  catch(e){$('hMsg').innerHTML=bad('JSON error: '+e.message);}};
+function holdView(h,running){
+  if(!h){$('hLive').innerHTML='';return;}
+  if(h.run_id!==holdRun){holdRun=h.run_id;holdRows=[];holdN=0;return;}      // new hold: fetch its rows from 0 on the next poll
+  holdRows=holdRows.concat(h.rows);holdN=h.n;if(holdRows.length>6000)holdRows=holdRows.slice(holdRows.length-6000);
+  const last=holdRows[holdRows.length-1]||{},alive=h.state==='starting'||h.state==='running';
+  $('hLive').innerHTML=[['position',fmt(last.pos,1)],['goal',h.goal],['error',fmt(last.err,1)],['mA',fmt(last.current_ma,0)],['°C',last.temp??'–']].map(([k,v])=>`<div class="num"><b>${v}</b><span>${k}</span></div>`).join('');
+  const pid=h.pid||{};$('hPid').textContent=pid.kind?('PID in use — '+pid.kind+': '+Object.entries(pid).filter(([k])=>k!=='kind').map(([k,v])=>k+'='+v).join(', ')):'';
+  $('hStop').disabled=!alive;
+  if(!alive&&h.state!=='starting')$('hMsg').innerHTML=(h.state==='error'?bad(h.message||'error'):good('Stopped. '+(h.message||'')))+(h.report?` Saved: <b>${h.report}</b>`:' Saving…');
+  else if(alive)$('hMsg').innerHTML=good(h.phase||'holding');
+  if(!$('s9').classList.contains('act'))return;            // plotly sizes itself from a visible container
+  const mk=(name,color,key,dash)=>({name,color,mode:'lines',dash,pts:holdRows.filter(r=>r[key]!=null).map(r=>({x:r.t_s,y:r[key]}))});
+  BenchPlot.draw($('hPos'),[mk('goal','#d97706','goal','dot'),mk('position','#2563eb','pos')],{dec:1,xtitle:'time (s)',ytitle:'encoder counts',height:260});
+  BenchPlot.draw($('hErr'),[mk('error','#dc2626','err')],{dec:1,xtitle:'time (s)',ytitle:'error (counts)',height:220});}
+
 // ---------- poll
 let lastRunId=null;
 function markDone(n,done){document.querySelector(`nav button[data-s="${n}"]`).classList.toggle('done',!!done);}
-async function poll(){const j=await api('/api/state?since='+(rowsCache.length));if(!j.ok)return;ST=j;const s=j.servo,t=j.telem,c=j.calib||{};
+async function poll(){const j=await api('/api/state?since='+(rowsCache.length)+'&hsince='+holdN);if(!j.ok)return;ST=j;holdView(j.hold,j.running);const s=j.servo,t=j.telem,c=j.calib||{};
   if(!formLoaded){fillForm(j.settings);loadPorts();formLoaded=true;}
   $('appVer').textContent='v'+j.version;fwJobView(j.fw_job);$('fwFlash').disabled=j.running;$('fwDownload').disabled=j.running;
   $('bConn').textContent=j.connected&&s?`servo: ${j.settings.port} · ID ${s.id}`:'servo: not connected';$('bConn').className='chip'+(j.connected&&s?' on':'');
@@ -558,7 +643,7 @@ async function poll(){const j=await api('/api/state?since='+(rowsCache.length));
   if(j.settings.roi&&!drag)drawRoi(j.settings.roi);else if(!drag)drawRoi(null);
   if(!j.camera_open&&j.camera_error)$('camMsg').innerHTML=bad(j.camera_error);
   const r=j.run;
-  ['runStart','runTrial','calCenter','connect','tqOn','tqOff','go','scan','disconnect','markAway','markGauge','posSave'].forEach(id=>$(id).disabled=j.running);
+  ['hStart','runStart','runTrial','calCenter','connect','tqOn','tqOff','go','scan','disconnect','markAway','markGauge','posSave'].forEach(id=>$(id).disabled=j.running);
   if(!r){$('phase').textContent='';return;}
   if(r.run_id!==lastRunId){rowsCache=[];lastRunId=r.run_id;const jj=await api('/api/state?since=0');r.rows=jj.run.rows;}
   if(rowsCache.some(x=>x.qwen_status==='pending')){const jj=await api('/api/runs/'+r.run_id);if(jj.ok)rowsCache=jj.rows;}else rowsCache=rowsCache.concat(r.rows);
@@ -574,7 +659,7 @@ async function poll(){const j=await api('/api/state?since='+(rowsCache.length));
   $('liveStats').innerHTML=statsHtml(r.summary);
   if(!document.activeElement||document.activeElement.closest('#rowsTbl')===null){$('rowsTbl').innerHTML=rowsHtml(rowsCache,r.run_id);bindEdits($('rowsTbl'),r.run_id,rowsCache);
     const sc=$('rowsTbl').parentElement;if(j.running)sc.scrollTop=sc.scrollHeight;}
-  plotRows($('chart'),rowsCache);
+  const sg=rowsSig(rowsCache);if(sg!==plotSig){plotSig=sg;plotRows($('chart'),rowsCache,r.run_id);}
 }
 setInterval(poll,500);poll();
 </script>
